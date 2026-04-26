@@ -1,55 +1,47 @@
-import React, { createContext, useContext, useState, ReactNode } from 'react';
-import { ToastContainer, toast, ToastOptions } from 'react-toastify';
-import 'react-toastify/dist/ReactToastify.css';
+import React, { createContext, useCallback, useContext, useState, ReactNode } from "react";
 
-type ToastContextType = {
-  showSuccess: (msg: string, opts?: ToastOptions) => void;
-  showError: (msg: string, opts?: ToastOptions) => void;
-};
+type ToastType = "success" | "error" | "info";
 
-const ToastContext = createContext<ToastContextType | undefined>(undefined);
+interface ToastItem {
+  id: string;
+  message: string;
+  type: ToastType;
+}
 
-export const ToastProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const showSuccess = (msg: string, opts?: ToastOptions) => toast.success(msg, opts);
-  const showError = (msg: string, opts?: ToastOptions) => toast.error(msg, opts);
+interface ToastContextType {
+  toast: (message: string, type?: ToastType) => void;
+}
 
-  return (
-    <ToastContext.Provider value={{ showSuccess, showError }}>
-      {children}
-      <ToastContainer position="top-right" autoClose={3000} />
-    </ToastContext.Provider>
-  );
-};
+const ToastCtx = createContext<ToastContextType | undefined>(undefined);
 
-export const useToast = (): ToastContextType => {
-  const ctx = useContext(ToastContext);
-  if (!ctx) {
-    throw new Error('useToast must be used within a ToastProvider');
-  }
-  return ctx;
-import React, { createContext, useCallback, useContext, useState } from "react";
-interface Toast { id: string; message: string; type: "success"|"error"|"info"; }
-interface Ctx { toast: (msg: string, type?: Toast["type"]) => void; }
-const ToastCtx = createContext<Ctx>({ toast: () => {} });
-export function ToastProvider({ children }: { children: React.ReactNode }) {
-  const [toasts, setToasts] = useState<Toast[]>([]);
-  const toast = useCallback((message: string, type: Toast["type"] = "info") => {
+export function ToastProvider({ children }: { children: ReactNode }) {
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
+
+  const toast = useCallback((message: string, type: ToastType = "info") => {
     const id = Math.random().toString(36).slice(2);
-    setToasts(p => [...p, { id, message, type }]);
-    setTimeout(() => setToasts(p => p.filter(t => t.id !== id)), 3500);
+    setToasts((prev) => [...prev, { id, message, type }]);
+    window.setTimeout(() => setToasts((prev) => prev.filter((item) => item.id !== id)), 3500);
   }, []);
+
   return (
     <ToastCtx.Provider value={{ toast }}>
       {children}
       <div className="toast-container">
-        {toasts.map(t => (
-          <div key={t.id} className={`toast ${t.type}`}>
-            <span>{t.type === "success" ? "✓" : t.type === "error" ? "✕" : "ℹ"}</span>
-            <span>{t.message}</span>
+        {toasts.map((toastItem) => (
+          <div key={toastItem.id} className={`toast ${toastItem.type}`}>
+            <span>{toastItem.type === "success" ? "✓" : toastItem.type === "error" ? "✕" : "ℹ"}</span>
+            <span>{toastItem.message}</span>
           </div>
         ))}
       </div>
     </ToastCtx.Provider>
   );
 }
-export const useToast = () => useContext(ToastCtx);
+
+export function useToast() {
+  const ctx = useContext(ToastCtx);
+  if (!ctx) {
+    throw new Error("useToast must be used within a ToastProvider");
+  }
+  return ctx;
+}

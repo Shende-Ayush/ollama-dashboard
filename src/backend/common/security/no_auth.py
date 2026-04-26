@@ -11,18 +11,18 @@ _ANON_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 
 def get_anonymous_user() -> UserApiClient:
     """Return a synthetic admin-level user with no rate limits."""
-    u = UserApiClient.__new__(UserApiClient)
-    u.id                = _ANON_ID
-    u.name              = "anonymous"
-    u.api_key_hash      = ""
-    u.role              = "admin"
-    u.rate_limit_per_min = 10_000
-    u.token_quota_daily  = 100_000_000
-    u.is_active          = True
-    u.created_at         = datetime.now(timezone.utc)
-    u.last_used_at       = None
-    u.metadata_json      = {}
-    return u
+    return UserApiClient(
+        id=_ANON_ID,
+        name="anonymous",
+        api_key_hash="",
+        role="admin",
+        rate_limit_per_min=10_000,
+        token_quota_daily=100_000_000,
+        is_active=True,
+        created_at=datetime.now(timezone.utc),
+        last_used_at=None,
+        metadata_json={},
+    )
 
 # Drop-in FastAPI dependency
 async def require_api_key() -> UserApiClient:          # noqa: D401

@@ -3,7 +3,7 @@ FROM node:20-alpine
 WORKDIR /frontend
 
 # Copy only package files first (better caching)
-COPY frontend/package.json frontend/package-lock.json* ./
+COPY frontend/package.json ./
 
 RUN npm install
 

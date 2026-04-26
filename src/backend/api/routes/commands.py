@@ -1,5 +1,6 @@
 """Commands router — no auth required."""
 import asyncio
+import shlex
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -94,8 +95,9 @@ async def command_stream(ws: WebSocket):
                 })
                 continue
 
+            parts = shlex.split(command)
             process = await asyncio.create_subprocess_exec(
-                *command.split(" "),
+                *parts,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
             )
@@ -107,7 +109,7 @@ async def command_stream(ws: WebSocket):
                 cmd_row = CommandHistory(
                     user_id=anon_user.id,
                     command=command,
-                    command_type=command.split(" ")[1] if len(command.split(" ")) > 1 else "unknown",
+                    command_type=parts[1] if len(parts) > 1 else "unknown",
                     status="started",
                     started_at=started,
                 )

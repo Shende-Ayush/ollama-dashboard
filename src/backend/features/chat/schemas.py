@@ -2,9 +2,13 @@ from pydantic import BaseModel
 from typing import Optional
 
 
-class ChatMessageInput(BaseModel):
+class ChatMessage(BaseModel):
     role: str
     content: str
+
+
+class ChatMessageInput(ChatMessage):
+    pass
 
 
 class ChatStartRequest(BaseModel):

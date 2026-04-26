@@ -55,7 +55,10 @@ async def get_models(
     search: str | None = None,
     session: AsyncSession = Depends(get_db_session),
 ):
-    models = await provider.list_models()
+    try:
+        models = await provider.list_models()
+    except Exception:
+        models = []
     if search:
         models = [m for m in models if search.lower() in m.get("name", "").lower()]
     normalized = [
@@ -129,11 +132,17 @@ async def stop_model(payload: StopModelRequest):
 async def clear_gpu():
     client = OllamaClient()
     running = await client.list_running()
+    stopped = []
     for model in running:
         name = model.get("name")
-        if name:
+        if not name:
+            continue
+        try:
             await provider.stop_model(name)
-    return {"status": "cleared", "stopped_models": [m.get("name") for m in running if m.get("name")]}
+            stopped.append(name)
+        except Exception:
+            continue
+    return {"status": "cleared", "stopped_models": stopped}
 
 
 @router.post("/models/pull")
@@ -183,9 +192,21 @@ async def pull_model(
 @router.get("/models/runtime")
 async def runtime_metrics(session: AsyncSession = Depends(get_db_session)):
     client = OllamaClient()
-    running = await client.list_running()
-    docker_stats = await docker_metrics.get_container_stats()
-    gpu_stats    = await gpu_metrics.get_gpu_stats()
+    try:
+        running = await client.list_running()
+    except Exception:
+        running = []
+
+    try:
+        docker_stats = await docker_metrics.get_container_stats()
+    except Exception:
+        docker_stats = {"cpu_percent": None, "memory_usage": None, "memory_limit": None}
+
+    try:
+        gpu_stats = await gpu_metrics.get_gpu_stats()
+    except Exception:
+        gpu_stats = {"utilization_percent": None, "vram_used_mb": None, "vram_total_mb": None}
+
     try:
         session.add(SystemMetric(
             cpu_percent=float(docker_stats["cpu_percent"]) if docker_stats.get("cpu_percent") is not None else None,

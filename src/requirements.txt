@@ -27,3 +27,4 @@ passlib[bcrypt]==1.7.4
 
 # Logging
 python-json-logger==3.2.1
+psutil==7.0.0
