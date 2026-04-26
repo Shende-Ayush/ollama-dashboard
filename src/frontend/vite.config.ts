@@ -8,11 +8,12 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      // Forward API calls to the backend during dev
+      // Forward API calls and websocket traffic to the backend during dev
       '/api': {
         target: backendUrl,
         changeOrigin: true,
         secure: false,
+        ws: true,
       },
     },
   },

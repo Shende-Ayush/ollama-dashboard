@@ -65,14 +65,15 @@ async def tokens_by_model(hours: int = Query(default=24, ge=1, le=720), session:
 @router.get("/analytics/requests-timeseries")
 async def requests_timeseries(hours: int = Query(default=24, ge=1, le=720), session: AsyncSession = Depends(get_db_session)):
     since = _since(hours)
+    bucket = func.date_trunc("hour", RequestLog.created_at).label("bucket")
     result = await session.execute(
-        select(func.date_trunc("hour", RequestLog.created_at).label("bucket"),
+        select(bucket,
                func.count().label("requests"),
                func.sum(RequestLog.tokens_input).label("tokens_in"),
                func.sum(RequestLog.tokens_output).label("tokens_out"))
         .where(RequestLog.created_at >= since)
-        .group_by(func.date_trunc("hour", RequestLog.created_at))
-        .order_by(func.date_trunc("hour", RequestLog.created_at))
+        .group_by(bucket)
+        .order_by(bucket)
     )
     return {"items": [{"bucket": r.bucket.isoformat() if r.bucket else None, "requests": int(r.requests),
         "tokens_in": int(r.tokens_in or 0), "tokens_out": int(r.tokens_out or 0)} for r in result]}

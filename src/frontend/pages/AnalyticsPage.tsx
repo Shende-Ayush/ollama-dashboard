@@ -33,6 +33,7 @@ export function AnalyticsPage() {
       setSys((sys.items||[]).map((r:any)=>({
         ...r,
         time: new Date(r.timestamp).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}),
+        cpu_pct: r.cpu_percent,
         gpu_util: r.gpu_utilization,
         vram_pct: r.vram_used_mb&&r.vram_total_mb ? Math.round(r.vram_used_mb/r.vram_total_mb*100) : null,
         ram_pct:  r.ram_used_mb&&r.ram_total_mb   ? Math.round(r.ram_used_mb/r.ram_total_mb*100)  : null,

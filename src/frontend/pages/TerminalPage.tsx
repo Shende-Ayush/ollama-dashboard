@@ -103,7 +103,7 @@ export function TerminalPage() {
 
       <div style={{ display:"flex", flex:1, overflow:"hidden", gap:0 }}>
         {/* Terminal output */}
-        <div style={{ flex:1, display:"flex", flexDirection:"column", background:"#030810", overflow:"hidden" }}>
+        <div style={{ flex:1, display:"flex", flexDirection:"column", background:"var(--bg-base)", overflow:"hidden" }}>
           <div ref={outRef} style={{ flex:1, overflowY:"auto", padding:"14px 18px", fontFamily:"var(--font-mono)", fontSize:12.5, lineHeight:1.75 }}>
             {lines.map((l, i) => (
               <div key={i} style={{ color: lineColor(l.type), whiteSpace:"pre-wrap", wordBreak:"break-all" }}>
@@ -120,7 +120,7 @@ export function TerminalPage() {
           </div>
 
           {/* Input row */}
-          <div style={{ borderTop:"1px solid #1a2438", padding:"10px 18px", display:"flex", alignItems:"center", gap:8, background:"#030810" }}>
+          <div style={{ borderTop:"1px solid var(--border-soft)", padding:"10px 18px", display:"flex", alignItems:"center", gap:8, background:"var(--bg-surface)" }}>
             <span style={{ fontFamily:"var(--font-mono)", fontSize:13, color:"var(--accent)", flexShrink:0 }}>$</span>
             <input
               ref={inputRef}

@@ -1,6 +1,6 @@
 import { getApiKey, getAuthHeaders } from "../common/auth";
-export const API_BASE = import.meta.env.VITE_API_BASE || "/v1";
-export const WS_BASE  = import.meta.env.VITE_WS_BASE  || `${location.protocol==="https:"?"wss":"ws"}://${location.host}/v1`;
+export const API_BASE = import.meta.env.VITE_API_BASE || "/api";
+export const WS_BASE  = import.meta.env.VITE_WS_BASE  || `${location.protocol==="https:"?"wss":"ws"}://${location.host}/api`;
 export class ApiError extends Error {
   constructor(public status: number, message: string) { super(message); }
 }
