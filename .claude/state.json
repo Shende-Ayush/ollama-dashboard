@@ -1,0 +1,8 @@
+{
+  "status": "initializing",
+  "current_task": null,
+  "active_agent": null,
+  "last_result": null,
+  "system_health": "unknown",
+  "loop_iteration": 0
+}
