@@ -1,0 +1,29 @@
+# Web framework
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+python-multipart==0.0.20
+
+# Database
+sqlalchemy[asyncio]==2.0.36
+asyncpg==0.30.0
+alembic==1.14.0
+
+# HTTP client (Ollama)
+httpx==0.28.1
+tenacity==9.0.0
+
+# Settings / validation
+pydantic==2.10.4
+pydantic-settings==2.7.0
+
+# Redis (rate-limit tracking)
+redis[asyncio]==5.2.1
+
+# Observability
+prometheus-client==0.21.1
+
+# Security (kept for future re-enable)
+passlib[bcrypt]==1.7.4
+
+# Logging
+python-json-logger==3.2.1

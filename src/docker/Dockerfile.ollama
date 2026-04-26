@@ -1,0 +1,4 @@
+FROM ollama/ollama:latest
+
+RUN (apt-get update && apt-get install -y --no-install-recommends htop nvtop && rm -rf /var/lib/apt/lists/*) || \
+    (apk add --no-cache htop nvtop) || true
