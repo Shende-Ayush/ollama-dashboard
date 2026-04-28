@@ -26,18 +26,26 @@ class OllamaScraper:
         results: list[OllamaModel] = []
 
         for card in cards:
-            text = card.get_text(separator="\n", strip=True)
-            lines = [line.strip() for line in text.split("\n") if line.strip()]
-            if not lines:
+            href = card.get("href", "")
+            name = href.removeprefix("/library/").strip("/")
+            if not name or "/" in name:
                 continue
 
-            name = lines[0]
-            description = lines[1] if len(lines) > 1 else None
+            text = card.get_text(separator="\n", strip=True)
+            lines = [line.strip() for line in text.split("\n") if line.strip()]
+            description = ""
+            if lines:
+                first = lines[0]
+                description = first[len(name):].strip() if first.lower().startswith(name.lower()) else first
+            sizes = [line.lower() for line in lines if line.lower().endswith(("b", "m")) and line[:-1].replace(".", "", 1).isdigit()]
+            tags = [line.lower() for line in lines if line.lower() in {"tools", "vision", "embedding", "thinking", "code"}]
 
             results.append(
                 OllamaModel(
                     name=name,
                     description=description,
+                    tags=tags,
+                    sizes=sizes,
                 )
             )
 

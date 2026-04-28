@@ -152,8 +152,9 @@ async def command_stream(ws: WebSocket):
                 )
                 write_session.add(cmd_row)
                 write_session.add(StreamingSession(request_id=request_id, type="command", status="started"))
-                await write_session.commit()
+                await write_session.flush()
                 command_id = cmd_row.id
+                await write_session.commit()
 
             output_buffer: list[str] = []
             exit_code = 0

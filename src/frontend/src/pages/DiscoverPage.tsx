@@ -1,10 +1,9 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { api, API_BASE } from "../api/client";
 
 import { useToast } from "../hooks/useToast";
 import type { PopularModel, PullProgress } from "../common/types";
 
-const FAMILIES = ["All","Llama","Mistral","CodeLlama","DeepSeek","Qwen","Phi","Gemma","Embedding"];
 const TAGS_FILTER = ["recommended","code","fast","reasoning","multilingual","embedding","large","tiny"];
 
 export function DiscoverPage() {
@@ -15,6 +14,9 @@ export function DiscoverPage() {
   const [tag, setTag]           = useState("");
   const [pulling, setPulling]   = useState<Record<string,PullProgress>>({});
   const [loading, setLoading]   = useState(true);
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [page, setPage] = useState({ pg_no:1, pg_size:24, total_records:0, total_pg:0 });
+  const latestRequest = useRef(0);
   const { toast } = useToast();
   const normalizeProgress = (ev: Partial<PullProgress>, previous?: PullProgress): PullProgress => ({
     request_id: ev.request_id || previous?.request_id,
@@ -31,18 +33,31 @@ export function DiscoverPage() {
   });
 
   useEffect(() => {
+    const id = window.setTimeout(() => setDebouncedSearch(search.trim()), 350);
+    return () => window.clearTimeout(id);
+  }, [search]);
+
+  useEffect(() => {
+    const requestId = latestRequest.current + 1;
+    latestRequest.current = requestId;
+    setLoading(true);
     (async () => {
       try {
         const params = new URLSearchParams();
         if (family !== "All") params.set("family", family);
-        if (search) params.set("search", search);
+        if (debouncedSearch) params.set("search", debouncedSearch);
+        if (tag) params.set("tag", tag);
+        params.set("pg_no", String(page.pg_no));
+        params.set("pg_size", String(page.pg_size));
         const r = await api.get<any>(`/models/popular?${params}`);
+        if (latestRequest.current !== requestId) return;
         setModels(r.items || []);
         setFamilies(r.families || []);
+        if (r.page) setPage(r.page);
       } catch (e:any) { toast(e.message,"error"); }
-      finally { setLoading(false); }
+      finally { if (latestRequest.current === requestId) setLoading(false); }
     })();
-  }, [family, search]);
+  }, [family, debouncedSearch, tag, page.pg_no, page.pg_size]);
 
   const startPull = async (modelId: string) => {
     if (pulling[modelId]) return;
@@ -79,14 +94,12 @@ export function DiscoverPage() {
     setPulling(p=>({...p,[modelId]:normalizeProgress({status:"cancelled"},p[modelId])}));
   };
 
-  const filtered = models.filter(m => !tag || m.tags.includes(tag));
-
   return (
     <div style={{display:"flex",flexDirection:"column",height:"100%",overflow:"hidden"}}>
       <div className="page-header">
         <div>
           <div className="page-title">◎ Discover Models</div>
-          <div className="page-subtitle">Curated Ollama model catalog · {filtered.length} models</div>
+          <div className="page-subtitle">Curated Ollama model catalog · {page.total_records || models.length} models</div>
         </div>
       </div>
 
@@ -94,13 +107,13 @@ export function DiscoverPage() {
         <div className="page-inner">
           {/* Filters */}
           <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-            <input className="input" placeholder="Search models…" value={search} onChange={e=>setSearch(e.target.value)} style={{width:240}} />
-            <select className="select" value={family} onChange={e=>setFamily(e.target.value)}>
+            <input className="input" placeholder="Search models…" value={search} onChange={e=>{ setSearch(e.target.value); setPage(p=>({...p, pg_no:1})); }} style={{width:240}} />
+            <select className="select" value={family} onChange={e=>{ setFamily(e.target.value); setPage(p=>({...p, pg_no:1})); }}>
               {["All",...families].map(f=><option key={f}>{f}</option>)}
             </select>
             <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
               {TAGS_FILTER.map(t=>(
-                <button key={t} className={`btn btn-sm ${tag===t?"btn-primary":"btn-secondary"}`} onClick={()=>setTag(tag===t?"":t)}>{t}</button>
+                <button key={t} className={`btn btn-sm ${tag===t?"btn-primary":"btn-secondary"}`} onClick={()=>{ setTag(tag===t?"":t); setPage(p=>({...p, pg_no:1})); }}>{t}</button>
               ))}
             </div>
           </div>
@@ -108,11 +121,12 @@ export function DiscoverPage() {
           {/* Grid */}
           {loading ? (
             <div className="grid-3">{[1,2,3,4,5,6].map(i=><div key={i} className="skeleton" style={{height:180,borderRadius:14}}/>)}</div>
-          ) : filtered.length===0 ? (
+          ) : models.length===0 ? (
             <div className="empty-state"><div className="empty-state-icon">◎</div><div className="empty-state-title">No matches</div></div>
           ) : (
+            <>
             <div className="grid-3">
-              {filtered.map(m=>(
+              {models.map(m=>(
                 <ModelCard key={m.id} model={m}
                   pullState={pulling[m.id]||null}
                   onPull={()=>startPull(m.id)}
@@ -120,6 +134,14 @@ export function DiscoverPage() {
                 />
               ))}
             </div>
+            {page.total_pg > 1 && (
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 0"}}>
+                <button className="btn btn-secondary btn-sm" disabled={page.pg_no<=1} onClick={()=>setPage(p=>({...p, pg_no:p.pg_no-1}))}>Previous</button>
+                <span style={{fontSize:12,color:"var(--text-muted)",fontFamily:"var(--font-mono)"}}>Page {page.pg_no} / {page.total_pg}</span>
+                <button className="btn btn-secondary btn-sm" disabled={page.pg_no>=page.total_pg} onClick={()=>setPage(p=>({...p, pg_no:p.pg_no+1}))}>Next</button>
+              </div>
+            )}
+            </>
           )}
         </div>
       </div>
@@ -130,6 +152,7 @@ export function DiscoverPage() {
 function ModelCard({model,pullState,onPull,onCancel}:{model:PopularModel;pullState:PullProgress|null;onPull:()=>void;onCancel:()=>void}) {
   const isPulling = !!pullState && pullState.status !== "success";
   const isDone    = model.installed || pullState?.status === "success";
+  const sizeLabel = model.size_gb ? `${model.size_gb} GB` : "Size unknown";
   return (
     <div className="card" style={{display:"flex",flexDirection:"column",gap:0,transition:"border-color 150ms",borderColor: model.recommended ? "var(--border-accent)":"var(--border-soft)"}}>
       <div style={{padding:"14px 16px",display:"flex",flexDirection:"column",gap:8,flex:1}}>
@@ -137,8 +160,8 @@ function ModelCard({model,pullState,onPull,onCancel}:{model:PopularModel;pullSta
         <div style={{fontFamily:"var(--font-mono)",fontSize:13,fontWeight:600,color:"var(--text-primary)"}}>{model.id}</div>
         <div style={{fontSize:12,color:"var(--text-secondary)",lineHeight:1.6,flex:1}}>{model.description}</div>
         <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:4}}>
-          <span className="badge badge-muted">{model.params}</span>
-          <span className="badge badge-muted">{model.size_gb} GB</span>
+          <span className="badge badge-muted">{model.params || "unknown"}</span>
+          <span className="badge badge-muted">{sizeLabel}</span>
           <span className="badge badge-cyan">{model.family}</span>
           {model.tags.slice(0,2).map(t=><span key={t} className="badge badge-muted">{t}</span>)}
         </div>
@@ -159,7 +182,7 @@ function ModelCard({model,pullState,onPull,onCancel}:{model:PopularModel;pullSta
         ) : isPulling ? (
           <button className="btn btn-secondary btn-sm" onClick={onCancel}>Cancel</button>
         ) : (
-          <button className="btn btn-primary btn-sm" onClick={onPull}>⬇ Pull {model.size_gb} GB</button>
+          <button className="btn btn-primary btn-sm" onClick={onPull}>⬇ Pull {sizeLabel}</button>
         )}
       </div>
     </div>

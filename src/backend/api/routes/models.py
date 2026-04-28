@@ -48,28 +48,59 @@ TERMINAL_DOWNLOAD_STATES = {"success", "error", "cancelled"}
 
 DEFAULT_POPULAR_MODELS = [
     {
-        "id": "llama2-13b-chat",
+        "id": "llama3.2:3b",
+        "model_name": "llama3.2:3b",
         "family": "llama",
-        "description": "Llama 2 13B chatbot model",
-        "tags": ["chat", "open-source"],
+        "description": "Small general chat model that runs well on local machines.",
+        "tags": ["chat", "tools", "fast", "small"],
         "recommended": True,
         "installed": False,
+        "params": "3b",
+        "size_gb": 2.0,
     },
     {
-        "id": "mistral-7b",
+        "id": "mistral:7b",
+        "model_name": "mistral:7b",
         "family": "mistral",
         "description": "Mistral 7B general-purpose model",
-        "tags": ["chat", "lm"],
+        "tags": ["chat", "fast"],
         "recommended": True,
         "installed": False,
+        "params": "7b",
+        "size_gb": 4.2,
     },
     {
-        "id": "qwen-7b",
+        "id": "qwen2.5:7b",
+        "model_name": "qwen2.5:7b",
         "family": "qwen",
         "description": "Qwen 7B model with strong reasoning",
-        "tags": ["chat", "general"],
+        "tags": ["chat", "reasoning", "multilingual"],
         "recommended": True,
         "installed": False,
+        "params": "7b",
+        "size_gb": 4.2,
+    },
+    {
+        "id": "deepseek-r1:7b",
+        "model_name": "deepseek-r1:7b",
+        "family": "deepseek",
+        "description": "Reasoning-focused model for step-by-step problem solving.",
+        "tags": ["chat", "reasoning"],
+        "recommended": True,
+        "installed": False,
+        "params": "7b",
+        "size_gb": 4.7,
+    },
+    {
+        "id": "nomic-embed-text",
+        "model_name": "nomic-embed-text",
+        "family": "embedding",
+        "description": "Embedding model for search, RAG, and document retrieval.",
+        "tags": ["embedding", "rag", "small"],
+        "recommended": True,
+        "installed": False,
+        "params": "137m",
+        "size_gb": 0.3,
     },
 ]
 
@@ -287,6 +318,8 @@ async def get_models(
 def infer_family(name: str) -> str:
     name = name.lower()
 
+    if "deepseek" in name:
+        return "deepseek"
     if "llama" in name:
         return "llama"
     if "mistral" in name:
@@ -299,14 +332,51 @@ def infer_family(name: str) -> str:
         return "phi"
     if "codellama" in name:
         return "code"
+    if any(token in name for token in ("embed", "nomic", "bge", "mxbai")):
+        return "embedding"
 
     return "other"
+
+
+def derive_tags(name: str, description: str, tags: list[str]) -> list[str]:
+    text = f"{name} {description}".lower()
+    derived = set(tags)
+    if any(token in text for token in ("embed", "nomic", "bge", "mxbai")):
+        derived.add("embedding")
+    else:
+        derived.add("chat")
+    if any(token in text for token in ("code", "coder", "codellama")):
+        derived.add("code")
+    if any(token in text for token in ("reason", "thinking", "r1")):
+        derived.add("reasoning")
+    if any(token in text for token in ("vision", "llava", "bakllava")):
+        derived.add("vision")
+    if any(token in text for token in ("1b", "3b", "tiny", "small", "mini")):
+        derived.add("small")
+        derived.add("fast")
+    if any(token in text for token in ("70b", "405b", "large")):
+        derived.add("large")
+    if any(token in text for token in ("qwen", "glm", "aya", "multilingual")):
+        derived.add("multilingual")
+    return sorted(derived)
+
+
+def estimate_model_size_gb(sizes: list[str]) -> float | None:
+    if not sizes:
+        return None
+    first = sizes[0].lower().strip()
+    number = "".join(ch for ch in first if ch.isdigit() or ch == ".")
+    if not number:
+        return None
+    params_b = float(number) / 1000 if first.endswith("m") else float(number)
+    return round(max(params_b * 0.6, 0.1), 1)
 
 
 @router.get("/models/popular")
 async def get_popular_models(
     family: Optional[str] = None,
     search: Optional[str] = None,
+    tag: Optional[str] = None,
     recommended_only: bool = False,
     pg_no: int = Query(default=1, ge=1),
     pg_size: int = Query(default=24, ge=1, le=100),
@@ -348,22 +418,32 @@ async def get_popular_models(
         external_results.append(
             {
                 "id": name,
+                "model_name": name,
                 "family": infer_family(name),
                 "description": m.description or "",
-                "tags": m.tags or [],
+                "tags": derive_tags(name, m.description or "", m.tags or []),
+                "params": m.sizes[0] if m.sizes else "unknown",
+                "size_gb": estimate_model_size_gb(m.sizes),
                 "recommended": True,
                 "installed": name in installed_names,
             }
         )
+
+    curated_results = [item.copy() for item in DEFAULT_POPULAR_MODELS]
+    for item in curated_results:
+        item["installed"] = item["id"].lower() in installed_names
 
     existing_ids = {m["id"] for m in external_results}
 
     installed_only = [
         {
             "id": name,
+            "model_name": name,
             "family": infer_family(name),
             "description": "Installed model",
             "tags": [],
+            "params": "installed",
+            "size_gb": None,
             "recommended": True,
             "installed": True,
         }
@@ -371,7 +451,16 @@ async def get_popular_models(
         if name not in existing_ids
     ]
 
-    results = external_results + installed_only
+    result_by_id = {item["id"]: item for item in curated_results}
+    for item in external_results + installed_only:
+        existing = result_by_id.get(item["id"])
+        if existing:
+            existing.update({key: value for key, value in item.items() if value not in (None, "", [], "unknown")})
+            existing["tags"] = sorted(set(existing.get("tags", [])) | set(item.get("tags", [])))
+        else:
+            result_by_id[item["id"]] = item
+
+    results = list(result_by_id.values())
 
     if not results:
         logger.info("No popular models found from Ollama; returning default fallback set")
@@ -388,6 +477,13 @@ async def get_popular_models(
             if search in r["id"] or search in (r.get("description") or "").lower()
         ]
 
+    if tag:
+        tag = tag.lower()
+        if tag == "recommended":
+            results = [r for r in results if r["recommended"]]
+        else:
+            results = [r for r in results if tag in [t.lower() for t in r.get("tags", [])]]
+
     if recommended_only:
         results = [r for r in results if r["recommended"]]
 
@@ -403,6 +499,7 @@ async def get_popular_models(
         "items": page["items"],
         "page": page["page"],
         "families": sorted(list({r["family"] for r in results})),
+        "tags": sorted(list({tag for r in results for tag in r.get("tags", [])})),
         "total": len(results),
     }
 
@@ -457,6 +554,7 @@ async def stop_pull(request_id: str, session: AsyncSession = Depends(get_db_sess
     job = await session.get(ModelDownloadJob, request_id)
     if not job:
         raise HTTPException(404, "Download job not found")
+    model_name = job.model_name
     job.stop_requested = True
     job.status = "cancelled" if job.status in {"queued", "connecting"} else job.status
     job.updated_at = datetime.now(timezone.utc)
@@ -464,7 +562,7 @@ async def stop_pull(request_id: str, session: AsyncSession = Depends(get_db_sess
     task = _pull_tasks.get(request_id)
     if task and not task.done():
         task.cancel()
-    return {"request_id": request_id, "status": "cancel_requested", "model": job.model_name}
+    return {"request_id": request_id, "status": "cancel_requested", "model": model_name}
 # -------------------------------
 # STOP MODEL
 # -------------------------------
