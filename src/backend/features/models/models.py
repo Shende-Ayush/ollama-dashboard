@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, Float, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Float, Integer, String, Text, BIGINT
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -27,8 +27,8 @@ class ModelDownloadJob(Base):
     model_name: Mapped[str] = mapped_column(String(255), index=True)
     status: Mapped[str] = mapped_column(String(64), index=True, default="queued")
     percent: Mapped[float] = mapped_column(Float, default=0)
-    completed_bytes: Mapped[int] = mapped_column(Integer, default=0)
-    total_bytes: Mapped[int] = mapped_column(Integer, default=0)
+    completed_bytes: Mapped[BIGINT] = mapped_column(BIGINT, default=0)
+    total_bytes: Mapped[BIGINT] = mapped_column(BIGINT, default=0)
     speed_mbps: Mapped[float] = mapped_column(Float, default=0)
     stop_requested: Mapped[bool] = mapped_column(Boolean, default=False)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -43,7 +43,7 @@ class ModelInstance(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     model_name: Mapped[str] = mapped_column(String(255), index=True)
     loaded_in_gpu: Mapped[bool] = mapped_column(Boolean, default=False)
-    memory_usage_mb: Mapped[int] = mapped_column(Integer, default=0)
+    memory_usage_mb: Mapped[BIGINT] = mapped_column(BIGINT, default=0)
     status: Mapped[str] = mapped_column(String(32), index=True, default="idle")
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     last_active_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

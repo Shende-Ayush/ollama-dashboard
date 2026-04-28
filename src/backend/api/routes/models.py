@@ -31,6 +31,12 @@ from backend.services.metrics.docker_metrics import DockerMetricsService
 from backend.services.metrics.gpu_metrics import GpuMetricsService
 from backend.services.ollama_client import OllamaClient
 from typing import Optional
+from backend.scrappers.ollama_scrapper import (
+    SortOption,
+    Capability,
+    get_models_from_page,
+    get_model_tags
+)
 
 from backend.utils.ollama_scraper.client import OllamaScraper
 import httpx
@@ -371,138 +377,47 @@ def estimate_model_size_gb(sizes: list[str]) -> float | None:
     params_b = float(number) / 1000 if first.endswith("m") else float(number)
     return round(max(params_b * 0.6, 0.1), 1)
 
-
+# -----------------------------------
+# API: GET MODELS (META + TAGS)
+# -----------------------------------
 @router.get("/models/popular")
-async def get_popular_models(
-    family: Optional[str] = None,
+async def get_models(
     search: Optional[str] = None,
-    tag: Optional[str] = None,
-    recommended_only: bool = False,
+    sort: SortOption = SortOption.POPULAR,
+    capabilities: Optional[list[Capability]] = Query(default=None),
     pg_no: int = Query(default=1, ge=1),
-    pg_size: int = Query(default=24, ge=1, le=100),
     session: AsyncSession = Depends(get_db_session),
 ):
+    """
+    Returns models with:
+    - meta (scraped)
+    """
     try:
-        installed = await provider.list_models()
-        installed_names = {
-            m.get("name", "").lower() for m in installed if m.get("name")
-        }
+        _models = get_models_from_page(page=pg_no,
+                                       query=search,
+                                       sort=sort,
+                                       capabilities=capabilities)
     except Exception as exc:
-        logger.warning("Unable to fetch installed Ollama models: %s", exc)
-        installed_names = set()
+        logger.error("Scraper failed: %s", exc)
+        _models = []
 
-    scraped_models = []
-    try:
-        scraper = OllamaScraper(max_pages=3)
-
-        scraped_models = await scraper.scrape(
-            query=search,
-            categories=None,
-            order="newest",
-        )
-    except Exception as exc:
-        logger.warning("Model scraper failed: %s", exc)
-        scraped_models = []
-
-    external_results = []
-    seen_external_ids: set[str] = set()
-    for m in scraped_models:
-        if not m.name:
-            continue
-
-        name = m.name.lower()
-        if name in seen_external_ids:
-            continue
-        seen_external_ids.add(name)
-
-        external_results.append(
-            {
-                "id": name,
-                "model_name": name,
-                "family": infer_family(name),
-                "description": m.description or "",
-                "tags": derive_tags(name, m.description or "", m.tags or []),
-                "params": m.sizes[0] if m.sizes else "unknown",
-                "size_gb": estimate_model_size_gb(m.sizes),
-                "recommended": True,
-                "installed": name in installed_names,
-            }
-        )
-
-    curated_results = [item.copy() for item in DEFAULT_POPULAR_MODELS]
-    for item in curated_results:
-        item["installed"] = item["id"].lower() in installed_names
-
-    existing_ids = {m["id"] for m in external_results}
-
-    installed_only = [
-        {
-            "id": name,
-            "model_name": name,
-            "family": infer_family(name),
-            "description": "Installed model",
-            "tags": [],
-            "params": "installed",
-            "size_gb": None,
-            "recommended": True,
-            "installed": True,
-        }
-        for name in installed_names
-        if name not in existing_ids
-    ]
-
-    result_by_id = {item["id"]: item for item in curated_results}
-    for item in external_results + installed_only:
-        existing = result_by_id.get(item["id"])
-        if existing:
-            existing.update({key: value for key, value in item.items() if value not in (None, "", [], "unknown")})
-            existing["tags"] = sorted(set(existing.get("tags", [])) | set(item.get("tags", [])))
-        else:
-            result_by_id[item["id"]] = item
-
-    results = list(result_by_id.values())
-
-    if not results:
-        logger.info("No popular models found from Ollama; returning default fallback set")
-        results = DEFAULT_POPULAR_MODELS.copy()
-
-    if family:
-        family = family.lower()
-        results = [r for r in results if r["family"] == family]
-
-    if search:
-        search = search.lower()
-        results = [
-            r for r in results
-            if search in r["id"] or search in (r.get("description") or "").lower()
-        ]
-
-    if tag:
-        tag = tag.lower()
-        if tag == "recommended":
-            results = [r for r in results if r["recommended"]]
-        else:
-            results = [r for r in results if tag in [t.lower() for t in r.get("tags", [])]]
-
-    if recommended_only:
-        results = [r for r in results if r["recommended"]]
-
-    results.sort(
-        key=lambda x: (
-            not x["installed"],  # installed first
-            x["id"],
-        )
-    )
-
-    page = paginate(results, pg_no=pg_no, pg_size=pg_size).model_dump()
     return {
-        "items": page["items"],
-        "page": page["page"],
-        "families": sorted(list({r["family"] for r in results})),
-        "tags": sorted(list({tag for r in results for tag in r.get("tags", [])})),
-        "total": len(results),
+        "items": _models,
+        "page": pg_no,
     }
 
+
+@router.get("/models/tags")
+async def get_model_tags_api(
+    model: str = Query(..., description="Model name to fetch tags for"),
+):
+    try:
+        avl_models_tags = get_model_tags(model_name=model)
+    except Exception as exc:
+        logger.error("Scraper failed: %s", exc)
+        avl_models_tags = []
+
+    return avl_models_tags
 
 @router.get("/models/pull-info")
 async def pull_info(model: str = Query(...), session: AsyncSession = Depends(get_db_session)):

@@ -6,9 +6,13 @@ const backendUrl = process.env.VITE_API_URL || 'http://localhost:8000';
 export default defineConfig({
   plugins: [react()],
   server: {
+    host: true,
     port: 5173,
+    watch: {
+      usePolling: true,
+      interval: 1,
+    },
     proxy: {
-      // Forward API calls and websocket traffic to the backend during dev
       '/api': {
         target: backendUrl,
         changeOrigin: true,

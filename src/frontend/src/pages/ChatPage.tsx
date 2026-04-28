@@ -62,9 +62,13 @@ export function ChatPage() {
   const [model, setModel]           = useState(sp.get("model") || "");
   const [contextTokens, setCtx]     = useState(4096);
   const [conversationId, setConvId] = useState<string | null>(convId || null);
+  const [conversationTitle, setConversationTitle] = useState("New conversation");
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [draftTitle, setDraftTitle] = useState("");
   const [messages, setMessages]     = useState<ChatMessage[]>([]);
   const [input, setInput]           = useState("");
   const [status, setStatus]         = useState<"idle" | "loading" | "streaming">("idle");
+  const [streamNotice, setStreamNotice] = useState("");
   const [requestId, setRequestId]   = useState("");
   const assistantMessageId          = useRef<string | null>(null);
   const esRef        = useRef<EventSource | null>(null);
@@ -99,6 +103,7 @@ export function ChatPage() {
     if (!convId) return;
     api.get<any>(`/conversations/${convId}`).then(r => {
       setConvId(r.id); setModel(r.model_name); setCtx(r.context_window);
+      setConversationTitle(r.title || "New conversation");
       setMessages(r.messages.map((m: any) => ({ id: m.id, role: m.role, content: m.content, token_count: m.token_count })));
     }).catch(e => toast(e.message, "error"));
   }, [convId]);
@@ -123,6 +128,7 @@ export function ChatPage() {
     setInput("");
     if (textareaRef.current) textareaRef.current.style.height = "44px";
     setStatus("loading");
+    setStreamNotice(`Loading ${model}. Please wait while Ollama prepares the model.`);
     isNearBottom.current = true;
 
     const markAssistantError = (message: string) => {
@@ -142,16 +148,22 @@ export function ChatPage() {
       setRequestId(rid);
       if (startRes.conversation_id && !conversationId) {
         setConvId(startRes.conversation_id);
+        setConversationTitle(userMsg.content.slice(0, 72));
         navigate(`/chat/${startRes.conversation_id}`, { replace: true });
       }
 
-      setStatus("streaming");
       const es = new EventSource(`${API_BASE}/chat/stream?request_id=${rid}`);
       esRef.current = es;
       es.onmessage = evt => {
         try {
           const data = JSON.parse(evt.data);
+          if (data.event_type === "loading") {
+            setStatus("loading");
+            setStreamNotice(data.payload?.message || `Loading ${model}. Please wait.`);
+          }
           if (data.event_type === "token") {
+            setStatus("streaming");
+            setStreamNotice("");
             setMessages(prev => prev.map(m => m.id === asstId ? { ...m, content: m.content + data.payload.token } : m));
           }
           if (data.event_type === "error") {
@@ -162,6 +174,7 @@ export function ChatPage() {
             es.close();
             esRef.current = null;
             setStatus("idle");
+            setStreamNotice("");
             assistantMessageId.current = null;
           }
         } catch {
@@ -172,11 +185,13 @@ export function ChatPage() {
         es.close();
         esRef.current = null;
         setStatus("idle");
+        setStreamNotice("");
         markAssistantError("Stream disconnected. Please try again.");
         toast("Stream error", "error");
       };
     } catch (e: any) {
       setStatus("idle");
+      setStreamNotice("");
       setMessages(prev => prev.filter(m => m.id !== asstId));
       assistantMessageId.current = null;
       toast(e.message, "error");
@@ -187,6 +202,7 @@ export function ChatPage() {
     esRef.current?.close(); esRef.current = null;
     if (requestId) await api.post("/chat/stop", { request_id: requestId }).catch(() => {});
     setStatus("idle");
+    setStreamNotice("");
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } };
@@ -196,13 +212,46 @@ export function ChatPage() {
     e.target.style.height = Math.min(e.target.scrollHeight, 180) + "px";
   };
 
-  const newChat = () => { setMessages([]); setConvId(null); setStatus("idle"); navigate("/chat", { replace: true }); };
+  const newChat = () => { setMessages([]); setConvId(null); setConversationTitle("New conversation"); setStatus("idle"); navigate("/chat", { replace: true }); };
+
+  const saveTitle = async () => {
+    if (!conversationId || !draftTitle.trim()) return;
+    const title = draftTitle.trim();
+    await api.patch(`/conversations/${conversationId}`, { title });
+    setConversationTitle(title);
+    setEditingTitle(false);
+    toast("Renamed", "success");
+  };
+
+  const deleteConversation = async () => {
+    if (!conversationId || !confirm("Delete this conversation?")) return;
+    await api.delete(`/conversations/${conversationId}`);
+    toast("Deleted", "success");
+    navigate("/conversations", { replace: true });
+  };
 
   return (
     <div style={{ display:"flex", flexDirection:"column", height:"100%", overflow:"hidden" }}>
       {/* Header */}
       <div className="page-header" style={{ gap:8, flexWrap:"wrap" }}>
         <div className="page-title">⌁ Chat</div>
+        {conversationId && (
+          <div style={{ display:"flex", alignItems:"center", gap:6, minWidth:220, maxWidth:360 }}>
+            {editingTitle ? (
+              <>
+                <input className="input" value={draftTitle} onChange={e=>setDraftTitle(e.target.value)} onKeyDown={e=>{ if(e.key==="Enter") saveTitle(); if(e.key==="Escape") setEditingTitle(false); }} autoFocus style={{ padding:"4px 8px", fontSize:12, minWidth:0 }} />
+                <button className="btn btn-primary btn-sm" onClick={saveTitle}>Save</button>
+                <button className="btn btn-secondary btn-sm" onClick={()=>setEditingTitle(false)}>Cancel</button>
+              </>
+            ) : (
+              <>
+                <span style={{ overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", fontSize:13, color:"var(--text-primary)" }}>{conversationTitle}</span>
+                <button className="btn btn-ghost btn-sm" onClick={()=>{ setDraftTitle(conversationTitle); setEditingTitle(true); }}>Rename</button>
+                <button className="btn btn-danger btn-sm" onClick={deleteConversation}>Delete</button>
+              </>
+            )}
+          </div>
+        )}
         <div style={{ display:"flex", alignItems:"center", gap:6, background:"var(--bg-elevated)", border:"1px solid var(--border)", borderRadius:10, padding:"4px 10px" }}>
           <span style={{ fontSize:10, fontWeight:700, textTransform:"uppercase", letterSpacing:"0.08em", color:"var(--text-muted)" }}>Model</span>
           <select className="select" value={model} onChange={e => setModel(e.target.value)} disabled={!models.length} style={{ border:"none", background:"transparent", padding:"2px 20px 2px 4px" }}>
@@ -245,8 +294,10 @@ export function ChatPage() {
                   )}
                 </div>
                 <div style={{ padding:"12px 16px", borderRadius: m.role === "user" ? "14px 14px 4px 14px" : "14px 14px 14px 4px", background: m.role === "user" ? "var(--bg-overlay)" : "var(--bg-surface)", border: m.role === "user" ? "1px solid var(--border-accent)" : "1px solid var(--border-soft)", color: m.role === "user" ? "#c7d2fe" : "var(--text-primary)" }}>
-                  {m.content === "" && status === "streaming" ? (
-                    <span style={{ color:"var(--text-muted)", fontStyle:"italic", fontSize:13 }}>Thinking…</span>
+                  {m.content === "" && (status === "loading" || status === "streaming") ? (
+                    <span style={{ color:"var(--text-muted)", fontStyle:"italic", fontSize:13 }}>
+                      {status === "loading" ? (streamNotice || "Loading model. Please wait…") : "Thinking…"}
+                    </span>
                   ) : (
                     <MarkdownContent content={m.content} />
                   )}

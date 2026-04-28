@@ -3,19 +3,25 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
+import sys
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
 from backend.common.db.base import Base
 from backend.common.db.models import *  # noqa: F401,F403
 from backend.common.config.settings import get_settings
 
 config = context.config
 settings = get_settings()
-config.set_main_option("sqlalchemy.url", settings.database_url)
+
+sync_url = settings.database_url.replace("+asyncpg", "")
+config.set_main_option("sqlalchemy.url", sync_url)
+
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 target_metadata = Base.metadata
-
 
 def run_migrations_offline() -> None:
     url = config.get_main_option("sqlalchemy.url")
