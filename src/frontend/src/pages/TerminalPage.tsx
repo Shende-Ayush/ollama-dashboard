@@ -20,6 +20,8 @@ export function TerminalPage() {
   const [history, setHistory] = useState<string[]>([]);
   const [histIdx, setHistIdx] = useState(-1);
   const [connected, setConnected] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState<"connecting"|"connected"|"disconnected">("connecting");
+  const [connectError, setConnectError] = useState<string | null>(null);
   const [running, setRunning]     = useState(false);
   const [cmdHistory, setCmdHistory] = useState<any[]>([]);
   const wsRef   = useRef<WebSocket|null>(null);
@@ -32,12 +34,28 @@ export function TerminalPage() {
     setTimeout(() => outRef.current?.scrollTo(0, outRef.current.scrollHeight), 0);
   };
 
-  useEffect(() => {
+  const connect = () => {
+    wsRef.current?.close();
+    setConnectionStatus("connecting");
+    setConnectError(null);
     const ws = new WebSocket(wsUrl("/commands/stream"));
     wsRef.current = ws;
-    ws.onopen  = () => { setConnected(true); addLine("● Connected","system"); };
-    ws.onclose = () => { setConnected(false); addLine("○ Disconnected","system"); };
-    ws.onerror = () => addLine("WebSocket error","error");
+    ws.onopen = () => {
+      setConnected(true);
+      setConnectionStatus("connected");
+      setConnectError(null);
+      addLine("● Connected","system");
+    };
+    ws.onclose = () => {
+      setConnected(false);
+      setConnectionStatus("disconnected");
+      addLine("○ Disconnected","system");
+    };
+    ws.onerror = () => {
+      setConnectionStatus("disconnected");
+      setConnectError("WebSocket connection failed");
+      addLine("WebSocket error","error");
+    };
     ws.onmessage = evt => {
       try {
         const d = JSON.parse(evt.data);
@@ -49,7 +67,11 @@ export function TerminalPage() {
         if (d.event_type==="stopped")   { setRunning(false); addLine("⏹ Stopped", "system"); }
       } catch {}
     };
-    return () => ws.close();
+  };
+
+  useEffect(() => {
+    connect();
+    return () => wsRef.current?.close();
   }, []);
 
   useEffect(() => {
@@ -91,12 +113,14 @@ export function TerminalPage() {
         <div>
           <div className="page-title">$ Terminal</div>
           <div className="page-subtitle" style={{ display:"flex", alignItems:"center", gap:6 }}>
-            <span className={`live-dot ${connected?"":"red"}`} />
-            {connected?"Connected to Ollama":"Disconnected"}
+            <span className={`live-dot ${connectionStatus==="connected"?"":"red"}`} />
+            {connectionStatus==="connecting" ? "Connecting…" : connectionStatus==="connected" ? "Connected to Ollama" : "Disconnected"}
           </div>
+          {connectError && <div style={{ fontSize:11, color:"var(--red)", marginTop:4 }}>{connectError}</div>}
         </div>
         <div className="page-header-sep" />
         {running && <button className="btn btn-danger btn-sm" onClick={stopCmd}>⏹ Stop</button>}
+        {connectionStatus==="disconnected" && !running && <button className="btn btn-primary btn-sm" onClick={connect}>Reconnect</button>}
         <button className="btn btn-ghost btn-sm" onClick={()=>navigator.clipboard.writeText(lines.map(l=>l.text).join("\n")).then(()=>toast("Copied","success"))}>Copy Output</button>
         <button className="btn btn-secondary btn-sm" onClick={clear}>Clear</button>
       </div>

@@ -28,6 +28,10 @@ export function ModelsPage() {
   const [search, setSearch]         = useState("");
   const [pulling, setPulling]       = useState<Record<string, PullProgress>>({});
   const [pullInput, setPullInput]   = useState("");
+  const [pullInfo, setPullInfo]     = useState<any>(null);
+  const [previewModel, setPreviewModel] = useState("");
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState("");
   const [loading, setLoading]       = useState(true);
   const { toast } = useToast();
   const navigate  = useNavigate();
@@ -66,8 +70,32 @@ export function ModelsPage() {
     load();
   };
 
+  const fetchPullInfo = async (modelId: string) => {
+    const trimmed = modelId.trim();
+    if (!trimmed) return;
+    setPreviewLoading(true);
+    setPreviewError("");
+    setPullInfo(null);
+    try {
+      const info = await api.get<any>(`/models/pull-info?model=${encodeURIComponent(trimmed)}`);
+      setPullInfo(info);
+      setPreviewModel(trimmed);
+    } catch (e: any) {
+      setPreviewError(e.message || "Unable to preview model");
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
+  const confirmPull = async () => {
+    if (!previewModel) return;
+    setPullInfo(null);
+    setPreviewModel("");
+    await startPull(previewModel);
+  };
+
   const startPull = async (modelId: string) => {
-    if (pulling[modelId]) return;
+    if (!modelId.trim() || pulling[modelId]) return;
     const ac = new AbortController();
     aborts.current[modelId] = ac;
     setPulling(p => ({ ...p, [modelId]: { status:"connecting", completed:0, total:0, percent:0, speed_mbps:0, eta_seconds:null, size_gb:null } }));
@@ -96,8 +124,13 @@ export function ModelsPage() {
           } catch {}
         }
       }
-    } catch (e: any) { if (e.name !== "AbortError") toast(`Pull failed: ${e.message}`, "error"); }
-    finally { setPulling(p => { const n = {...p}; delete n[modelId]; return n; }); }
+    } catch (e: any) {
+      if (e.name !== "AbortError") {
+        toast(`Pull failed: ${e.message}`, "error");
+      }
+    } finally {
+      setPulling(p => { const n = {...p}; delete n[modelId]; return n; });
+    }
   };
 
   const cancelPull = (id: string) => { aborts.current[id]?.abort(); };
@@ -125,6 +158,7 @@ export function ModelsPage() {
           <div className="grid-4" style={{ gap:12 }}>
             {[
               { label:"GPU Utilization", v:fmt(gpu?.utilization_percent, "%"), sub: `${fmt(gpu?.vram_used_mb)} / ${fmt(gpu?.vram_total_mb)} MB VRAM`, gauge:<GaugeBar value={gpu?.vram_used_mb} max={gpu?.vram_total_mb} /> },
+              { label:"CPU Usage",     v: fmt(container?.cpu_percent, "%"), sub: "Host CPU load", gauge:<GaugeBar value={container?.cpu_percent} max={100} /> },
               { label:"Container RAM",   v: container?.memory_usage ? bytes(container.memory_usage) : "–", sub: container?.memory_limit ? `of ${bytes(container.memory_limit)}` : "n/a", gauge:<GaugeBar value={container?.memory_usage} max={container?.memory_limit} color="amber" /> },
               { label:"Running Models",  v: String(running.length),   sub:"currently loaded in GPU", gauge:null },
               { label:"Installed",       v: String(installed.length), sub:"locally available",       gauge:null },
@@ -143,9 +177,38 @@ export function ModelsPage() {
             <div className="card-header"><span className="card-title">⬇ Pull by Model ID</span></div>
             <div className="card-body">
               <div style={{ display:"flex", gap:8 }}>
-                <input className="input input-mono" placeholder="e.g. llama3.2:3b  or  qwen2.5:14b" value={pullInput} onChange={e => setPullInput(e.target.value)} onKeyDown={e => e.key==="Enter" && startPull(pullInput.trim())} style={{ flex:1 }} />
-                <button className="btn btn-primary" onClick={() => startPull(pullInput.trim())} disabled={!pullInput.trim()}>Pull</button>
+                <input className="input input-mono" placeholder="e.g. llama3.2:3b  or  qwen2.5:14b" value={pullInput} onChange={e => setPullInput(e.target.value)} onKeyDown={e => e.key==="Enter" && !previewLoading && fetchPullInfo(pullInput.trim())} style={{ flex:1 }} />
+                <button className="btn btn-primary" onClick={() => fetchPullInfo(pullInput.trim())} disabled={!pullInput.trim() || previewLoading}>
+                  {previewLoading ? "Checking…" : "Preview"}
+                </button>
               </div>
+              {previewError && (
+                <div style={{ marginTop:10, color:"var(--red)", fontSize:12 }}>{previewError}</div>
+              )}
+              {pullInfo && previewModel === pullInput.trim() && (
+                <div style={{ marginTop:12, padding:14, border:"1px solid var(--border)", borderRadius:10, background:"var(--bg-elevated)" }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:10, marginBottom:12 }}>
+                    <div>
+                      <div style={{ fontSize:12, color:"var(--text-muted)" }}>Confirm pull</div>
+                      <div style={{ fontFamily:"var(--font-mono)", fontSize:14, fontWeight:600 }}>{pullInfo.model_name}</div>
+                    </div>
+                    <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+                      <button className="btn btn-primary btn-sm" onClick={confirmPull} disabled={!!pulling[previewModel]}>
+                        {pulling[previewModel] ? "Pulling…" : "Start Pull"}
+                      </button>
+                      <button className="btn btn-secondary btn-sm" onClick={() => { setPullInfo(null); setPreviewModel(""); setPreviewError(""); }}>
+                        Change
+                      </button>
+                    </div>
+                  </div>
+                  <div style={{ display:"grid", gap:6, fontSize:12, color:"var(--text-muted)", fontFamily:"var(--font-mono)" }}>
+                    <div>Size: {pullInfo.download_size_gb ? `${pullInfo.download_size_gb} GB` : "Unknown"}</div>
+                    <div>Disk after pull: {pullInfo.estimated_disk_after_pull_gb ? `${pullInfo.estimated_disk_after_pull_gb} GB` : "Unknown"}</div>
+                    <div>Status: {pullInfo.downloaded ? "Already installed" : "Not installed"}</div>
+                    {pullInfo.pulled_at && <div>Last pulled: {new Date(pullInfo.pulled_at).toLocaleString()}</div>}
+                  </div>
+                </div>
+              )}
               {pulling[pullInput] && (
                 <div style={{ marginTop:12 }}>
                   <PullProgressCard id={pullInput} p={pulling[pullInput]} onCancel={() => cancelPull(pullInput)} />

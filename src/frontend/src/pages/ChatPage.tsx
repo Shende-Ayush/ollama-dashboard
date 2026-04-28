@@ -67,6 +67,7 @@ export function ChatPage() {
   const [input, setInput]           = useState("");
   const [status, setStatus]         = useState<"idle" | "loading" | "streaming">("idle");
   const [requestId, setRequestId]   = useState("");
+  const assistantMessageId          = useRef<string | null>(null);
   const esRef        = useRef<EventSource | null>(null);
   const msgsEndRef   = useRef<HTMLDivElement>(null);
   const textareaRef  = useRef<HTMLTextAreaElement>(null);
@@ -103,12 +104,19 @@ export function ChatPage() {
     if (!input.trim() || status === "streaming") return;
     const userMsg: ChatMessage = { id: crypto.randomUUID(), role: "user", content: input.trim() };
     const asstId = crypto.randomUUID();
+    assistantMessageId.current = asstId;
     const newMessages = [...messages, userMsg];
     setMessages([...newMessages, { id: asstId, role: "assistant", content: "" }]);
     setInput("");
     if (textareaRef.current) textareaRef.current.style.height = "44px";
     setStatus("loading");
     isNearBottom.current = true;
+
+    const markAssistantError = (message: string) => {
+      if (!assistantMessageId.current) return;
+      setMessages(prev => prev.map(m => m.id === assistantMessageId.current ? { ...m, content: m.content || message } : m));
+      assistantMessageId.current = null;
+    };
 
     try {
       const startRes = await api.post<any>("/chat/start-auth", {
@@ -130,12 +138,36 @@ export function ChatPage() {
       es.onmessage = evt => {
         try {
           const data = JSON.parse(evt.data);
-          if (data.event_type === "token") setMessages(prev => prev.map(m => m.id === asstId ? { ...m, content: m.content + data.payload.token } : m));
-          if (data.event_type === "done" || data.event_type === "stopped") { es.close(); esRef.current = null; setStatus("idle"); }
-        } catch {}
+          if (data.event_type === "token") {
+            setMessages(prev => prev.map(m => m.id === asstId ? { ...m, content: m.content + data.payload.token } : m));
+          }
+          if (data.event_type === "error") {
+            markAssistantError("Stream error. Please try again.");
+            toast(data.payload?.message || "Stream error", "error");
+          }
+          if (data.event_type === "done" || data.event_type === "stopped") {
+            es.close();
+            esRef.current = null;
+            setStatus("idle");
+            assistantMessageId.current = null;
+          }
+        } catch {
+          markAssistantError("Stream error. Please try again.");
+        }
       };
-      es.onerror = () => { es.close(); esRef.current = null; setStatus("idle"); toast("Stream error", "error"); };
-    } catch (e: any) { setStatus("idle"); toast(e.message, "error"); }
+      es.onerror = () => {
+        es.close();
+        esRef.current = null;
+        setStatus("idle");
+        markAssistantError("Stream disconnected. Please try again.");
+        toast("Stream error", "error");
+      };
+    } catch (e: any) {
+      setStatus("idle");
+      setMessages(prev => prev.filter(m => m.id !== asstId));
+      assistantMessageId.current = null;
+      toast(e.message, "error");
+    }
   };
 
   const stop = async () => {

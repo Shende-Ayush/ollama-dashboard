@@ -4,7 +4,11 @@ Chat router — no auth required.
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, Query
+import logging
+
+logger = logging.getLogger(__name__)
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,14 +34,34 @@ _requests: dict[str, ChatStartRequest] = {}
 _stopped_requests: set[str] = set()
 
 
+async def ensure_model_available(model_name: str) -> None:
+    try:
+        installed_models = await provider.list_models()
+    except Exception as exc:
+        logger.warning("Unable to verify Ollama model availability: %s", exc)
+        raise HTTPException(status_code=503, detail="Ollama is not reachable. Start Ollama and try again.") from exc
+
+    installed_names = {model.get("name") for model in installed_models if model.get("name")}
+    if model_name not in installed_names:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Model '{model_name}' is not installed. Pull or select an installed model before chatting.",
+        )
+
+
 @router.post("/chat/start", response_model=ChatStartResponse)
 async def chat_start(payload: ChatStartRequest) -> ChatStartResponse:
     request_id = uuid4().hex
     for msg in payload.messages:
         validate_prompt_content(msg.content)
+    await ensure_model_available(payload.model)
     trimmed = context_manager.trim_messages(payload.messages, payload.context_tokens)
     _requests[request_id] = payload.model_copy(update={"messages": trimmed})
-    return ChatStartResponse(request_id=request_id, status="ready")
+    return ChatStartResponse(
+        request_id=request_id,
+        status="ready",
+        conversation_id=None,
+    )
 
 
 @router.post("/chat/start-auth", response_model=ChatStartResponse)
@@ -47,6 +71,9 @@ async def chat_start_auth(
     session: AsyncSession = Depends(get_db_session),
 ) -> ChatStartResponse:
     request_id = uuid4().hex
+    for msg in payload.messages:
+        validate_prompt_content(msg.content)
+    await ensure_model_available(payload.model)
     trimmed = context_manager.trim_messages(payload.messages, payload.context_tokens)
     token_input = sum(max(1, len(m.content) // 4) for m in trimmed)
 
@@ -61,42 +88,57 @@ async def chat_start_auth(
             context_window=payload.context_tokens,
             total_tokens=0,
         )
-        session.add(conversation)
-        await session.flush()
+        try:
+            session.add(conversation)
+            await session.flush()
+        except Exception as e:
+            logger.error(f"Error adding conversation: {e}")
+            raise
 
-    for msg in trimmed:
-        session.add(Message(
-            conversation_id=conversation.id,
-            role=msg.role,
-            content=msg.content,
-            token_count=max(1, len(msg.content) // 4),
-            latency_ms=0,
+    try:
+        for msg in trimmed:
+            session.add(Message(
+                conversation_id=conversation.id,
+                role=msg.role,
+                content=msg.content,
+                token_count=max(1, len(msg.content) // 4),
+                latency_ms=0,
+                model_name=payload.model,
+                request_id=request_id,
+            ))
+
+        session.add(RequestLog(
+            user_id=current_user.id,
+            endpoint="/v1/chat/start-auth",
+            method="POST",
             model_name=payload.model,
-            request_id=request_id,
+            status="ready",
+            tokens_input=token_input,
+            ip_address=None,
         ))
+        session.add(StreamingSession(request_id=request_id, type="chat", status="ready"))
 
-    session.add(RequestLog(
-        user_id=current_user.id,
-        endpoint="/v1/chat/start-auth",
-        method="POST",
-        model_name=payload.model,
-        status="ready",
-        tokens_input=token_input,
-        ip_address=None,
-    ))
-    session.add(StreamingSession(request_id=request_id, type="chat", status="ready"))
-    await session.commit()
+        conversation_id = str(conversation.id)
+        await session.commit()
+    except Exception as e:
+        logger.error(f"Error committing session: {e}")
+        raise
 
-    _requests[request_id] = payload.model_copy(update={
-        "messages": trimmed,
-        "conversation_id": str(conversation.id),
-    })
-    TOKENS_IN.labels(model=payload.model).inc(token_input)
-    ACTIVE_STREAMS.labels(type="chat").inc()
+    try:
+        _requests[request_id] = payload.model_copy(update={
+            "messages": trimmed,
+            "conversation_id": conversation_id,
+        })
+        TOKENS_IN.labels(model=payload.model).inc(token_input)
+        ACTIVE_STREAMS.labels(type="chat").inc()
+    except Exception as e:
+        logger.error(f"Error updating metrics or requests: {e}")
+        raise
+
     return ChatStartResponse(
         request_id=request_id,
         status="ready",
-        conversation_id=str(conversation.id),
+        conversation_id=conversation_id,
     )
 
 
@@ -109,13 +151,15 @@ async def chat_stream(
     # No token validation — open access
     req = _requests.get(request_id)
     if not req:
-        from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="request_id not found")
 
     async def event_gen():
         output_tokens = 0
         started = datetime.now(timezone.utc)
         was_interrupted = False
+        assistant_content = ""
+        stream_status = "done"
+        stream_error: str | None = None
         try:
             async for token_chunk in provider.chat_stream(
                 model=req.model,
@@ -124,13 +168,22 @@ async def chat_stream(
             ):
                 if request_id in _stopped_requests:
                     was_interrupted = True
+                    stream_status = "stopped"
                     yield f"data: {StreamEvent(event_type='stopped', request_id=request_id, payload={}).model_dump_json()}\n\n"
                     break
+                assistant_content += token_chunk
                 yield f"data: {StreamEvent(event_type='token', request_id=request_id, payload={'token': token_chunk}).model_dump_json()}\n\n"
                 output_tokens += max(1, len(token_chunk) // 4)
-            yield f"data: {StreamEvent(event_type='done', request_id=request_id, payload={}).model_dump_json()}\n\n"
+            if not was_interrupted:
+                yield f"data: {StreamEvent(event_type='done', request_id=request_id, payload={}).model_dump_json()}\n\n"
+        except Exception as exc:
+            logger.exception("Chat stream failed for request %s", request_id)
+            stream_status = "error"
+            stream_error = str(exc)
+            yield f"data: {StreamEvent(event_type='error', request_id=request_id, payload={'message': stream_error}).model_dump_json()}\n\n"
         finally:
             await session_registry.pop(request_id)
+            _requests.pop(request_id, None)
             _stopped_requests.discard(request_id)
             duration_ms = int((datetime.now(timezone.utc) - started).total_seconds() * 1000)
             TOKENS_OUT.labels(model=req.model).inc(output_tokens)
@@ -140,14 +193,14 @@ async def chat_stream(
                 )
                 stream_row = result.scalar_one_or_none()
                 if stream_row:
-                    stream_row.status = "done"
+                    stream_row.status = stream_status
                     stream_row.ended_at = datetime.now(timezone.utc)
                     stream_row.interrupted = was_interrupted
                 if req.conversation_id:
                     session.add(Message(
                         conversation_id=req.conversation_id,
                         role="assistant",
-                        content="",
+                        content=assistant_content,
                         token_count=output_tokens,
                         latency_ms=duration_ms,
                         model_name=req.model,
@@ -163,8 +216,9 @@ async def chat_stream(
                     gpu_used=True,
                 ))
                 await session.commit()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("Failed to persist chat stream result for %s: %s", request_id, exc)
+                await session.rollback()
 
     return StreamingResponse(event_gen(), media_type="text/event-stream")
 

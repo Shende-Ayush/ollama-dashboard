@@ -22,3 +22,7 @@ __pycache__/
 
 logs/
 dev/
+
+.claude/
+.continue/
+.docker/
