@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class ModelItem(BaseModel):
@@ -13,4 +13,4 @@ class StopModelRequest(BaseModel):
 
 
 class PullModelRequest(BaseModel):
-    model: str
+    model: str = Field(min_length=1, max_length=255)

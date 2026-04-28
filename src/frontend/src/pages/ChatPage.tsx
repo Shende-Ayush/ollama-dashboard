@@ -8,7 +8,6 @@ import { api, API_BASE } from "../api/client";
 import { useToast } from "../hooks/useToast";
 import type { ChatMessage } from "../common/types";
 
-const MODELS_FALLBACK = ["llama3.2:3b","mistral:7b","qwen2.5:7b","gemma3:4b","phi4","codellama:7b"];
 const CTX_OPTIONS = [2048, 4096, 8192, 16384, 32768];
 
 function CodeBlock({ language, text }: { language: string; text: string }) {
@@ -60,7 +59,7 @@ export function ChatPage() {
   const { toast }    = useToast();
 
   const [models, setModels]         = useState<string[]>([]);
-  const [model, setModel]           = useState(sp.get("model") || "llama3.2:3b");
+  const [model, setModel]           = useState(sp.get("model") || "");
   const [contextTokens, setCtx]     = useState(4096);
   const [conversationId, setConvId] = useState<string | null>(convId || null);
   const [messages, setMessages]     = useState<ChatMessage[]>([]);
@@ -76,9 +75,23 @@ export function ChatPage() {
 
   // Load models
   useEffect(() => {
-    api.get<any>("/models?pg_size=100")
-      .then(r => { const names = (r.items || []).map((m: any) => m.name); setModels(names.length ? names : MODELS_FALLBACK); if (!sp.get("model") && names.length) setModel(names[0]); })
-      .catch(() => setModels(MODELS_FALLBACK));
+    (async () => {
+      try {
+        const names: string[] = [];
+        let pgNo = 1;
+        let totalPg = 1;
+        while (pgNo <= totalPg) {
+          const r = await api.get<any>(`/models?pg_no=${pgNo}&pg_size=100`);
+          names.push(...(r.items || []).map((m: any) => m.name));
+          totalPg = r.page?.total_pg || 1;
+          pgNo += 1;
+        }
+        setModels(names);
+        if (!sp.get("model") && names.length) setModel(names[0]);
+      } catch {
+        setModels([]);
+      }
+    })();
   }, []);
 
   // Load conversation
@@ -101,7 +114,7 @@ export function ChatPage() {
   const ctxPct = Math.min(100, (usedTokens / contextTokens) * 100);
 
   const send = async () => {
-    if (!input.trim() || status === "streaming") return;
+    if (!input.trim() || !model || status === "streaming") return;
     const userMsg: ChatMessage = { id: crypto.randomUUID(), role: "user", content: input.trim() };
     const asstId = crypto.randomUUID();
     assistantMessageId.current = asstId;
@@ -192,7 +205,8 @@ export function ChatPage() {
         <div className="page-title">⌁ Chat</div>
         <div style={{ display:"flex", alignItems:"center", gap:6, background:"var(--bg-elevated)", border:"1px solid var(--border)", borderRadius:10, padding:"4px 10px" }}>
           <span style={{ fontSize:10, fontWeight:700, textTransform:"uppercase", letterSpacing:"0.08em", color:"var(--text-muted)" }}>Model</span>
-          <select className="select" value={model} onChange={e => setModel(e.target.value)} style={{ border:"none", background:"transparent", padding:"2px 20px 2px 4px" }}>
+          <select className="select" value={model} onChange={e => setModel(e.target.value)} disabled={!models.length} style={{ border:"none", background:"transparent", padding:"2px 20px 2px 4px" }}>
+            {models.length === 0 && <option value="">No installed models</option>}
             {models.map(m => <option key={m} value={m}>{m}</option>)}
           </select>
         </div>
@@ -259,7 +273,7 @@ export function ChatPage() {
             {status === "streaming" || status === "loading" ? (
               <button className="btn btn-danger btn-sm" style={{ height:36, flexShrink:0 }} onClick={stop}>◼ Stop</button>
             ) : (
-              <button className="btn btn-primary btn-icon-only" style={{ width:36, height:36, flexShrink:0, borderRadius:10 }} onClick={send} disabled={!input.trim()}>↑</button>
+              <button className="btn btn-primary btn-icon-only" style={{ width:36, height:36, flexShrink:0, borderRadius:10 }} onClick={send} disabled={!input.trim() || !model}>↑</button>
             )}
           </div>
           <div style={{ marginTop:5, textAlign:"center", fontSize:11, color:"var(--text-muted)" }}>

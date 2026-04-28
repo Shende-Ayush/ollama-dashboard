@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, Float, Integer, String
+from sqlalchemy import Boolean, DateTime, Float, Integer, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -18,6 +18,23 @@ class ModelRegistryCache(Base):
     downloaded: Mapped[bool] = mapped_column(Boolean, default=False)
     pulled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ModelDownloadJob(Base):
+    __tablename__ = "model_download_jobs"
+
+    request_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    model_name: Mapped[str] = mapped_column(String(255), index=True)
+    status: Mapped[str] = mapped_column(String(64), index=True, default="queued")
+    percent: Mapped[float] = mapped_column(Float, default=0)
+    completed_bytes: Mapped[int] = mapped_column(Integer, default=0)
+    total_bytes: Mapped[int] = mapped_column(Integer, default=0)
+    speed_mbps: Mapped[float] = mapped_column(Float, default=0)
+    stop_requested: Mapped[bool] = mapped_column(Boolean, default=False)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class ModelInstance(Base):

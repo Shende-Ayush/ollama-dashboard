@@ -15,6 +15,7 @@ export function ConversationsPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch]   = useState("");
   const [archived, setArchived] = useState(false);
+  const [page, setPage] = useState({ pg_no:1, pg_size:20, total_records:0, total_pg:0 });
   const [editing, setEditing] = useState<string|null>(null);
   const [editTitle, setEditTitle] = useState("");
   const { toast } = useToast();
@@ -22,15 +23,16 @@ export function ConversationsPage() {
 
   const load = async () => {
     try {
-      const params = new URLSearchParams({ pg_size:"100", archived: String(archived) });
+      const params = new URLSearchParams({ pg_no:String(page.pg_no), pg_size:String(page.pg_size), archived: String(archived) });
       if (search) params.set("q", search);
       const r = await api.get<any>(`/conversations?${params}`);
       setConvs(r.items || []);
+      if (r.page) setPage(r.page);
     } catch (e:any) { toast(e.message,"error"); }
     finally { setLoading(false); }
   };
 
-  useEffect(() => { load(); }, [archived, search]);
+  useEffect(() => { load(); }, [archived, search, page.pg_no, page.pg_size]);
 
   const deleteConv = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -55,26 +57,24 @@ export function ConversationsPage() {
     load();
   };
 
-  const filtered = convs.filter(c => !search || c.title.toLowerCase().includes(search.toLowerCase()));
-
   return (
     <div style={{ display:"flex", flexDirection:"column", height:"100%", overflow:"hidden" }}>
       <div className="page-header">
         <div>
           <div className="page-title">≡ Conversations</div>
-          <div className="page-subtitle">{filtered.length} conversation{filtered.length!==1?"s":""}</div>
+          <div className="page-subtitle">{page.total_records} conversation{page.total_records!==1?"s":""}</div>
         </div>
         <div className="page-header-sep" />
-        <input className="input" placeholder="Search…" value={search} onChange={e=>setSearch(e.target.value)} style={{ width:200 }} />
-        <button className={`btn btn-sm ${!archived?"btn-primary":"btn-secondary"}`} onClick={()=>setArchived(false)}>Active</button>
-        <button className={`btn btn-sm ${archived?"btn-primary":"btn-secondary"}`} onClick={()=>setArchived(true)}>Archived</button>
+        <input className="input" placeholder="Search…" value={search} onChange={e=>{ setSearch(e.target.value); setPage(p=>({...p, pg_no:1})); }} style={{ width:200 }} />
+        <button className={`btn btn-sm ${!archived?"btn-primary":"btn-secondary"}`} onClick={()=>{ setArchived(false); setPage(p=>({...p, pg_no:1})); }}>Active</button>
+        <button className={`btn btn-sm ${archived?"btn-primary":"btn-secondary"}`} onClick={()=>{ setArchived(true); setPage(p=>({...p, pg_no:1})); }}>Archived</button>
         <button className="btn btn-primary btn-sm" onClick={()=>navigate("/chat")}>+ New Chat</button>
       </div>
 
       <div className="page-body">
         {loading ? (
           <div className="page-inner">{[1,2,3,4].map(i=><div key={i} className="skeleton" style={{ height:72, borderRadius:12, marginBottom:8 }}/>)}</div>
-        ) : filtered.length===0 ? (
+        ) : convs.length===0 ? (
           <div className="empty-state">
             <div className="empty-state-icon">≡</div>
             <div className="empty-state-title">{archived?"No archived conversations":"No conversations yet"}</div>
@@ -83,7 +83,7 @@ export function ConversationsPage() {
           </div>
         ) : (
           <div style={{ padding:"8px 24px", display:"flex", flexDirection:"column", gap:6 }}>
-            {filtered.map(c => (
+            {convs.map(c => (
               <div key={c.id} onClick={()=>navigate(`/chat/${c.id}`)}
                 style={{ display:"flex", alignItems:"center", gap:12, padding:"14px 16px", background:"var(--bg-surface)", border:"1px solid var(--border-soft)", borderRadius:12, cursor:"pointer", transition:"border-color 150ms, background 150ms" }}
                 onMouseEnter={e=>{(e.currentTarget as HTMLDivElement).style.borderColor="var(--border-strong)"; (e.currentTarget as HTMLDivElement).style.background="var(--bg-elevated)";}}
@@ -103,6 +103,7 @@ export function ConversationsPage() {
                     <span className="badge badge-muted">{c.model_name}</span>
                     <span>{c.context_window/1024}K ctx</span>
                     <span>{c.total_tokens.toLocaleString()} tokens</span>
+                    <span>{(c.message_count || 0).toLocaleString()} messages</span>
                     <span>{relTime(c.updated_at)}</span>
                   </div>
                 </div>
@@ -113,6 +114,13 @@ export function ConversationsPage() {
                 </div>
               </div>
             ))}
+            {page.total_pg > 1 && (
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"12px 2px" }}>
+                <button className="btn btn-secondary btn-sm" disabled={page.pg_no<=1} onClick={()=>setPage(p=>({...p, pg_no:p.pg_no-1}))}>Previous</button>
+                <span style={{ fontSize:12, color:"var(--text-muted)", fontFamily:"var(--font-mono)" }}>Page {page.pg_no} / {page.total_pg}</span>
+                <button className="btn btn-secondary btn-sm" disabled={page.pg_no>=page.total_pg} onClick={()=>setPage(p=>({...p, pg_no:p.pg_no+1}))}>Next</button>
+              </div>
+            )}
           </div>
         )}
       </div>

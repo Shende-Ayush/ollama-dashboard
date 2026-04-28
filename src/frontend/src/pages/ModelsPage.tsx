@@ -27,6 +27,8 @@ export function ModelsPage() {
   const [container, setContainer]   = useState<any>(null);
   const [search, setSearch]         = useState("");
   const [pulling, setPulling]       = useState<Record<string, PullProgress>>({});
+  const [deleting, setDeleting]     = useState<Record<string, boolean>>({});
+  const [page, setPage]             = useState({ pg_no:1, pg_size:20, total_records:0, total_pg:0 });
   const [pullInput, setPullInput]   = useState("");
   const [pullInfo, setPullInfo]     = useState<any>(null);
   const [previewModel, setPreviewModel] = useState("");
@@ -35,21 +37,43 @@ export function ModelsPage() {
   const [loading, setLoading]       = useState(true);
   const { toast } = useToast();
   const navigate  = useNavigate();
-  const aborts    = useRef<Record<string, AbortController>>({});
+  const normalizeProgress = (ev: Partial<PullProgress>, previous?: PullProgress): PullProgress => ({
+    request_id: ev.request_id || previous?.request_id,
+    model: ev.model || ev.model_name || previous?.model,
+    model_name: ev.model_name || ev.model || previous?.model_name,
+    status: ev.status || previous?.status || "connecting",
+    completed: ev.completed ?? previous?.completed ?? 0,
+    total: ev.total ?? previous?.total ?? 0,
+    percent: ev.percent ?? previous?.percent ?? 0,
+    speed_mbps: ev.speed_mbps ?? previous?.speed_mbps ?? 0,
+    eta_seconds: ev.eta_seconds ?? previous?.eta_seconds ?? null,
+    size_gb: ev.size_gb ?? previous?.size_gb ?? null,
+    error: ev.error ?? previous?.error ?? null,
+  });
 
   const load = useCallback(async () => {
     try {
-      const [modRes, rtRes] = await Promise.all([
-        api.get<any>("/models?pg_size=100"),
+      const [modRes, rtRes, dlRes] = await Promise.all([
+        api.get<any>(`/models?pg_no=${page.pg_no}&pg_size=${page.pg_size}${search ? `&search=${encodeURIComponent(search)}` : ""}`),
         api.get<any>("/models/runtime"),
+        api.get<any>("/models/downloads?active_only=true&pg_size=100"),
       ]);
       setInstalled(modRes.items || []);
+      if (modRes.page) setPage(modRes.page);
       setRunning(rtRes.models || []);
       setGpu(rtRes.gpu);
       setContainer(rtRes.container);
+      setPulling(prev => {
+        const activePulls: Record<string, PullProgress> = {};
+        (dlRes.items || []).forEach((d: PullProgress) => {
+          const id = d.model_name || d.model || "";
+          if (id) activePulls[id] = normalizeProgress(d, prev[id]);
+        });
+        return activePulls;
+      });
     } catch (e: any) { toast(e.message, "error"); }
     finally { setLoading(false); }
-  }, []);
+  }, [page.pg_no, page.pg_size, search]);
 
   useEffect(() => { load(); const id = setInterval(load, 4000); return () => clearInterval(id); }, [load]);
 
@@ -65,9 +89,17 @@ export function ModelsPage() {
 
   const deleteModel = async (name: string) => {
     if (!confirm(`Delete ${name}?`)) return;
-    await api.delete(`/models/${encodeURIComponent(name)}`);
-    toast(`Deleted ${name}`, "success");
-    load();
+    setDeleting(p => ({ ...p, [name]: true }));
+    try {
+      await api.delete(`/models/${encodeURIComponent(name)}`);
+      setInstalled(p => p.filter(m => m.name !== name));
+      toast(`Deleted ${name}`, "success");
+      load();
+    } catch (e: any) {
+      toast(e.message || `Delete failed for ${name}`, "error");
+    } finally {
+      setDeleting(p => { const n = { ...p }; delete n[name]; return n; });
+    }
   };
 
   const fetchPullInfo = async (modelId: string) => {
@@ -96,15 +128,18 @@ export function ModelsPage() {
 
   const startPull = async (modelId: string) => {
     if (!modelId.trim() || pulling[modelId]) return;
-    const ac = new AbortController();
-    aborts.current[modelId] = ac;
     setPulling(p => ({ ...p, [modelId]: { status:"connecting", completed:0, total:0, percent:0, speed_mbps:0, eta_seconds:null, size_gb:null } }));
     try {
       const res = await fetch(`${API_BASE}/models/pull`, {
-        method:"POST", signal:ac.signal,
+        method:"POST",
         headers:{ "Content-Type":"application/json" },
         body: JSON.stringify({ model: modelId }),
       });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({ detail: res.statusText }));
+        throw new Error(body.detail || "Pull failed");
+      }
+      if (!res.body) throw new Error("Pull stream unavailable");
       const reader = res.body!.getReader();
       const dec    = new TextDecoder();
       let buf = "";
@@ -119,23 +154,31 @@ export function ModelsPage() {
           if (!data) continue;
           try {
             const ev = JSON.parse(data);
-            setPulling(p => ({ ...p, [modelId]: ev }));
+            setPulling(p => ({ ...p, [modelId]: normalizeProgress(ev, p[modelId]) }));
             if (ev.status === "success") { toast(`${modelId} pulled!`, "success"); load(); }
+            if (ev.status === "error") { toast(ev.error || `Pull failed for ${modelId}`, "error"); }
           } catch {}
         }
       }
     } catch (e: any) {
-      if (e.name !== "AbortError") {
-        toast(`Pull failed: ${e.message}`, "error");
-      }
+      toast(`Pull failed: ${e.message}`, "error");
     } finally {
-      setPulling(p => { const n = {...p}; delete n[modelId]; return n; });
+      setPulling(p => {
+        const current = p[modelId];
+        if (current && !["success", "error", "cancelled"].includes(current.status)) return p;
+        const n = {...p}; delete n[modelId]; return n;
+      });
     }
   };
 
-  const cancelPull = (id: string) => { aborts.current[id]?.abort(); };
+  const cancelPull = async (id: string) => {
+    const rid = pulling[id]?.request_id;
+    if (!rid) return;
+    await api.post(`/models/pull/${rid}/stop`).catch((e: any) => toast(e.message, "error"));
+    setPulling(p => ({ ...p, [id]: normalizeProgress({ status: "cancelled" }, p[id]) }));
+  };
 
-  const filtered = installed.filter(m => !search || m.name.toLowerCase().includes(search.toLowerCase()));
+  const filtered = installed;
   const runningNames = new Set(running.map(r => r.name));
 
   return (
@@ -233,7 +276,7 @@ export function ModelsPage() {
           <div className="card">
             <div className="card-header">
               <span className="card-title">Installed Models</span>
-              <input className="input" placeholder="Search…" value={search} onChange={e => setSearch(e.target.value)} style={{ width:200, padding:"4px 10px", fontSize:12 }} />
+              <input className="input" placeholder="Search…" value={search} onChange={e => { setSearch(e.target.value); setPage(p => ({ ...p, pg_no:1 })); }} style={{ width:200, padding:"4px 10px", fontSize:12 }} />
             </div>
             {loading ? (
               <div className="card-body" style={{ display:"flex", flexDirection:"column", gap:8 }}>
@@ -250,11 +293,19 @@ export function ModelsPage() {
                 {filtered.map(m => (
                   <ModelRow key={m.name} model={m}
                     isRunning={runningNames.has(m.name)}
+                    isDeleting={!!deleting[m.name]}
                     onStop={() => stopModel(m.name)}
                     onDelete={() => deleteModel(m.name)}
                     onChat={() => navigate(`/chat?model=${encodeURIComponent(m.name)}`)}
                   />
                 ))}
+                {page.total_pg > 1 && (
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"12px 18px", borderTop:"1px solid var(--border-soft)" }}>
+                    <button className="btn btn-secondary btn-sm" disabled={page.pg_no <= 1} onClick={() => setPage(p => ({ ...p, pg_no:p.pg_no-1 }))}>Previous</button>
+                    <span style={{ fontSize:12, color:"var(--text-muted)", fontFamily:"var(--font-mono)" }}>Page {page.pg_no} / {page.total_pg} · {page.total_records} models</span>
+                    <button className="btn btn-secondary btn-sm" disabled={page.pg_no >= page.total_pg} onClick={() => setPage(p => ({ ...p, pg_no:p.pg_no+1 }))}>Next</button>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -264,7 +315,7 @@ export function ModelsPage() {
   );
 }
 
-function ModelRow({ model, isRunning, onStop, onDelete, onChat }: { model: InstalledModel; isRunning: boolean; onStop: () => void; onDelete: () => void; onChat: () => void; }) {
+function ModelRow({ model, isRunning, isDeleting, onStop, onDelete, onChat }: { model: InstalledModel; isRunning: boolean; isDeleting: boolean; onStop: () => void; onDelete: () => void; onChat: () => void; }) {
   return (
     <div style={{ display:"flex", alignItems:"center", gap:12, padding:"12px 18px", borderBottom:"1px solid var(--border-soft)" }}>
       <div style={{ flex:1, minWidth:0 }}>
@@ -279,12 +330,14 @@ function ModelRow({ model, isRunning, onStop, onDelete, onChat }: { model: Insta
           <span>{model.parameter_size || "–"}</span>
           <span>{model.size_gb ? `${model.size_gb} GB` : bytes(model.size)}</span>
           {model.modified_at && <span>modified {new Date(model.modified_at).toLocaleDateString()}</span>}
+          {model.pulled_at && <span>pulled {new Date(model.pulled_at).toLocaleDateString()}</span>}
         </div>
+        {model.download && <div style={{ marginTop:8 }}><PullProgressCard id={model.name} p={model.download} onCancel={() => {}} /></div>}
       </div>
       <div style={{ display:"flex", gap:6 }}>
-        <button className="btn btn-primary btn-sm" onClick={onChat}>Chat</button>
-        {isRunning && <button className="btn btn-secondary btn-sm" onClick={onStop}>Stop</button>}
-        <button className="btn btn-danger btn-sm" onClick={onDelete}>Delete</button>
+        <button className="btn btn-primary btn-sm" onClick={onChat} disabled={isDeleting}>Chat</button>
+        {isRunning && <button className="btn btn-secondary btn-sm" onClick={onStop} disabled={isDeleting}>Stop</button>}
+        <button className="btn btn-danger btn-sm" onClick={onDelete} disabled={isDeleting}>{isDeleting ? "Deleting…" : "Delete"}</button>
       </div>
     </div>
   );

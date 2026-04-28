@@ -14,12 +14,10 @@ EXACT_ALLOWED = {
 
 # Commands that accept a single model-name arg
 MODEL_ARG_COMMANDS = {
-    "ollama run",
     "ollama pull",
     "ollama show",
     "ollama rm",
-    "ollama push",
-    "ollama cp",
+    "ollama stop",
 }
 
 # Safe model name pattern: letters, digits, dash, underscore, colon, dot, slash

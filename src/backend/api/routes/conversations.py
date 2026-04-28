@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.common.db.session import get_db_session
@@ -35,18 +35,32 @@ async def get_conversations(
         stmt = stmt.where(Conversation.is_archived == archived)
     if q:
         stmt = stmt.where(Conversation.title.ilike(f"%{q}%"))
-    result = await session.execute(stmt)
+    total_result = await session.execute(select(func.count()).select_from(stmt.subquery()))
+    total_records = total_result.scalar() or 0
+    result = await session.execute(stmt.offset((pg_no - 1) * pg_size).limit(pg_size))
     rows = result.scalars().all()
+    ids = [r.id for r in rows]
+    message_counts: dict = {}
+    if ids:
+        counts = await session.execute(
+            select(Message.conversation_id, func.count().label("message_count"))
+            .where(Message.conversation_id.in_(ids))
+            .group_by(Message.conversation_id)
+        )
+        message_counts = {row.conversation_id: int(row.message_count) for row in counts}
     items = [
         {
             "id": str(r.id), "title": r.title, "model_name": r.model_name,
             "context_window": r.context_window, "total_tokens": r.total_tokens,
             "created_at": r.created_at.isoformat(), "updated_at": r.updated_at.isoformat(),
-            "is_archived": r.is_archived,
+            "is_archived": r.is_archived, "message_count": message_counts.get(r.id, 0),
         }
         for r in rows
     ]
-    return paginate(items, pg_no=pg_no, pg_size=pg_size).model_dump()
+    return {
+        "page": {"pg_no": pg_no, "pg_size": pg_size, "total_records": total_records, "total_pg": (total_records + pg_size - 1) // pg_size if total_records else 0},
+        "items": items,
+    }
 
 
 @router.get("/conversations/{conversation_id}")
@@ -111,9 +125,10 @@ async def get_messages(
     pg_size: int = Query(default=100, ge=1, le=500),
     session: AsyncSession = Depends(get_db_session),
 ):
-    result = await session.execute(
-        select(Message).where(Message.conversation_id == conversation_id).order_by(Message.created_at.asc())
-    )
+    base = select(Message).where(Message.conversation_id == conversation_id).order_by(Message.created_at.asc())
+    total_result = await session.execute(select(func.count()).select_from(select(Message).where(Message.conversation_id == conversation_id).subquery()))
+    total_records = total_result.scalar() or 0
+    result = await session.execute(base.offset((pg_no - 1) * pg_size).limit(pg_size))
     rows = result.scalars().all()
     items = [
         {"id": str(r.id), "role": r.role, "content": r.content,
@@ -121,4 +136,7 @@ async def get_messages(
          "request_id": r.request_id, "created_at": r.created_at.isoformat()}
         for r in rows
     ]
-    return paginate(items, pg_no=pg_no, pg_size=pg_size).model_dump()
+    return {
+        "page": {"pg_no": pg_no, "pg_size": pg_size, "total_records": total_records, "total_pg": (total_records + pg_size - 1) // pg_size if total_records else 0},
+        "items": items,
+    }

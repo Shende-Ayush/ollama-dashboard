@@ -9,7 +9,7 @@ T = TypeVar("T")
 
 class PageMeta(BaseModel):
     pg_no: int = Field(default=1, ge=1)
-    pg_size: int = Field(default=20, ge=1, le=100)
+    pg_size: int = Field(default=20, ge=1, le=500)
     total_records: int = Field(default=0, ge=0)
     total_pg: int = Field(default=0, ge=0)
 

@@ -4,13 +4,11 @@ import { useToast } from "../hooks/useToast";
 
 interface Line { text: string; type: "input"|"output"|"system"|"error"; }
 
-const SUGGESTIONS = [
+const FALLBACK_SUGGESTIONS = [
   { cmd:"ollama ps",           desc:"List running models" },
   { cmd:"ollama list",         desc:"List installed models" },
   { cmd:"ollama version",      desc:"Show Ollama version" },
   { cmd:"ollama pull llama3.2", desc:"Pull latest Llama 3.2" },
-  { cmd:"ollama pull mistral", desc:"Pull Mistral 7B" },
-  { cmd:"ollama run llama3.2", desc:"Run Llama 3.2 interactively" },
   { cmd:"ollama show llama3.2",desc:"Show model details" },
 ];
 
@@ -24,6 +22,9 @@ export function TerminalPage() {
   const [connectError, setConnectError] = useState<string | null>(null);
   const [running, setRunning]     = useState(false);
   const [cmdHistory, setCmdHistory] = useState<any[]>([]);
+  const [historyPage, setHistoryPage] = useState({ pg_no:1, pg_size:10, total_records:0, total_pg:0 });
+  const [suggestions, setSuggestions] = useState(FALLBACK_SUGGESTIONS);
+  const [activeRequestId, setActiveRequestId] = useState("");
   const wsRef   = useRef<WebSocket|null>(null);
   const outRef  = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -60,13 +61,19 @@ export function TerminalPage() {
       try {
         const d = JSON.parse(evt.data);
         if (d.event_type==="connected") return;
-        if (d.event_type==="started")   { setRunning(true);  addLine(`▶ ${d.payload?.command||""}`, "system"); }
+        if (d.event_type==="started")   { setRunning(true); setActiveRequestId(d.request_id||""); addLine(`▶ ${d.payload?.command||""}`, "system"); }
         if (d.event_type==="output")    { addLine(d.payload?.line||"", "output"); }
-        if (d.event_type==="done")      { setRunning(false); addLine(`✓ Exit ${d.payload?.exit_code??0}`, "system"); }
-        if (d.event_type==="error")     { setRunning(false); addLine(`✕ ${d.payload?.message||"Error"}`, "error"); }
-        if (d.event_type==="stopped")   { setRunning(false); addLine("⏹ Stopped", "system"); }
+        if (d.event_type==="done")      { setRunning(false); setActiveRequestId(""); addLine(`✓ Exit ${d.payload?.exit_code??0}`, "system"); loadHistory(); }
+        if (d.event_type==="error")     { setRunning(false); setActiveRequestId(""); addLine(`✕ ${d.payload?.message||"Error"}`, "error"); loadHistory(); }
+        if (d.event_type==="stopped")   { setRunning(false); setActiveRequestId(""); addLine("⏹ Stopped", "system"); loadHistory(); }
       } catch {}
     };
+  };
+
+  const loadHistory = () => {
+    api.get<any>(`/commands/history?pg_no=${historyPage.pg_no}&pg_size=${historyPage.pg_size}`)
+      .then(r => { setCmdHistory(r.items||[]); if (r.page) setHistoryPage(r.page); })
+      .catch(()=>{});
   };
 
   useEffect(() => {
@@ -74,8 +81,11 @@ export function TerminalPage() {
     return () => wsRef.current?.close();
   }, []);
 
+  useEffect(() => { loadHistory(); }, [historyPage.pg_no, historyPage.pg_size]);
   useEffect(() => {
-    api.get<any>("/commands/history?pg_size=20").then(r => setCmdHistory(r.items||[])).catch(()=>{});
+    api.get<any>("/commands/suggestions")
+      .then(r => setSuggestions((r.items || []).map((s:any) => ({ cmd:s.cmd, desc:s.description }))))
+      .catch(()=>setSuggestions(FALLBACK_SUGGESTIONS));
   }, []);
 
   const run = () => {
@@ -89,7 +99,7 @@ export function TerminalPage() {
   };
 
   const stopCmd = () => {
-    wsRef.current?.send(JSON.stringify({ action:"stop" }));
+    wsRef.current?.send(JSON.stringify({ action:"stop", request_id: activeRequestId }));
   };
 
   const clear = () => setLines([{ text:"Terminal cleared","type":"system" }]);
@@ -167,7 +177,7 @@ export function TerminalPage() {
           <div style={{ padding:"12px 14px", borderBottom:"1px solid var(--border-soft)" }}>
             <div className="card-title" style={{ marginBottom:10 }}>Quick Commands</div>
             <div style={{ display:"flex", flexDirection:"column", gap:4 }}>
-              {SUGGESTIONS.map(s=>(
+              {suggestions.map(s=>(
                 <button key={s.cmd} style={{ background:"transparent", border:"1px solid var(--border-soft)", borderRadius:8, padding:"7px 10px", cursor:"pointer", textAlign:"left", transition:"all 120ms" }}
                   onClick={()=>{ setInput(s.cmd); inputRef.current?.focus(); }}
                   onMouseEnter={e=>(e.currentTarget.style.borderColor="var(--border-accent)")}
@@ -195,6 +205,13 @@ export function TerminalPage() {
                     </div>
                   </div>
                 ))}
+                {historyPage.total_pg > 1 && (
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginTop:8 }}>
+                    <button className="btn btn-secondary btn-sm" disabled={historyPage.pg_no<=1} onClick={()=>setHistoryPage(p=>({...p, pg_no:p.pg_no-1}))}>Prev</button>
+                    <span style={{ fontSize:10, color:"var(--text-muted)", fontFamily:"var(--font-mono)" }}>{historyPage.pg_no}/{historyPage.total_pg}</span>
+                    <button className="btn btn-secondary btn-sm" disabled={historyPage.pg_no>=historyPage.total_pg} onClick={()=>setHistoryPage(p=>({...p, pg_no:p.pg_no+1}))}>Next</button>
+                  </div>
+                )}
               </div>
             )}
           </div>

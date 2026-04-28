@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { api, API_BASE } from "../api/client";
 
 import { useToast } from "../hooks/useToast";
@@ -16,7 +16,19 @@ export function DiscoverPage() {
   const [pulling, setPulling]   = useState<Record<string,PullProgress>>({});
   const [loading, setLoading]   = useState(true);
   const { toast } = useToast();
-  const aborts = useRef<Record<string,AbortController>>({});
+  const normalizeProgress = (ev: Partial<PullProgress>, previous?: PullProgress): PullProgress => ({
+    request_id: ev.request_id || previous?.request_id,
+    model: ev.model || ev.model_name || previous?.model,
+    model_name: ev.model_name || ev.model || previous?.model_name,
+    status: ev.status || previous?.status || "connecting",
+    completed: ev.completed ?? previous?.completed ?? 0,
+    total: ev.total ?? previous?.total ?? 0,
+    percent: ev.percent ?? previous?.percent ?? 0,
+    speed_mbps: ev.speed_mbps ?? previous?.speed_mbps ?? 0,
+    eta_seconds: ev.eta_seconds ?? previous?.eta_seconds ?? null,
+    size_gb: ev.size_gb ?? previous?.size_gb ?? null,
+    error: ev.error ?? previous?.error ?? null,
+  });
 
   useEffect(() => {
     (async () => {
@@ -34,15 +46,18 @@ export function DiscoverPage() {
 
   const startPull = async (modelId: string) => {
     if (pulling[modelId]) return;
-    const ac = new AbortController();
-    aborts.current[modelId] = ac;
     setPulling(p => ({...p, [modelId]:{ status:"connecting",completed:0,total:0,percent:0,speed_mbps:0,eta_seconds:null,size_gb:null }}));
     try {
       const res = await fetch(`${API_BASE}/models/pull`,{
-        method:"POST", signal:ac.signal,
+        method:"POST",
         headers:{"Content-Type":"application/json"},
         body: JSON.stringify({model:modelId}),
       });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({ detail: res.statusText }));
+        throw new Error(body.detail || "Pull failed");
+      }
+      if (!res.body) throw new Error("Pull stream unavailable");
       const reader = res.body!.getReader(); const dec = new TextDecoder(); let buf="";
       while(true){
         const{done,value}=await reader.read(); if(done) break;
@@ -50,11 +65,18 @@ export function DiscoverPage() {
         const lines=buf.split("\n\n"); buf=lines.pop()||"";
         for(const line of lines){
           const data=line.replace(/^data: /,"").trim(); if(!data) continue;
-          try{ const ev=JSON.parse(data); setPulling(p=>({...p,[modelId]:ev})); if(ev.status==="success"){ toast(`${modelId} pulled!`,"success"); } }catch{}
+          try{ const ev=JSON.parse(data); setPulling(p=>({...p,[modelId]:normalizeProgress(ev,p[modelId])})); if(ev.status==="success"){ toast(`${modelId} pulled!`,"success"); } if(ev.status==="error"){ toast(ev.error || `Pull failed for ${modelId}`,"error"); } }catch{}
         }
       }
-    } catch(e:any){ if(e.name!=="AbortError") toast(`Pull failed: ${e.message}`,"error"); }
-    finally{ setPulling(p=>{ const n={...p}; delete n[modelId]; return n; }); }
+    } catch(e:any){ toast(`Pull failed: ${e.message}`,"error"); }
+    finally{ setPulling(p=>{ const current=p[modelId]; if(current && !["success","error","cancelled"].includes(current.status)) return p; const n={...p}; delete n[modelId]; return n; }); }
+  };
+
+  const cancelPull = async (modelId: string) => {
+    const rid = pulling[modelId]?.request_id;
+    if (!rid) return;
+    await api.post(`/models/pull/${rid}/stop`).catch((e:any)=>toast(e.message,"error"));
+    setPulling(p=>({...p,[modelId]:normalizeProgress({status:"cancelled"},p[modelId])}));
   };
 
   const filtered = models.filter(m => !tag || m.tags.includes(tag));
@@ -94,7 +116,7 @@ export function DiscoverPage() {
                 <ModelCard key={m.id} model={m}
                   pullState={pulling[m.id]||null}
                   onPull={()=>startPull(m.id)}
-                  onCancel={()=>aborts.current[m.id]?.abort()}
+                  onCancel={()=>cancelPull(m.id)}
                 />
               ))}
             </div>

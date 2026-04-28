@@ -27,10 +27,12 @@ from backend.features.users.models import UserApiClient
 from backend.services.context_manager import context_manager
 from backend.services.process_supervisor import process_supervisor
 from backend.services.session_registry import session_registry
+from backend.services.token_counter import token_counter
 
 router = APIRouter(tags=["chat"])
 provider = OllamaProvider()
 _requests: dict[str, ChatStartRequest] = {}
+_request_input_tokens: dict[str, int] = {}
 _stopped_requests: set[str] = set()
 
 
@@ -49,6 +51,14 @@ async def ensure_model_available(model_name: str) -> None:
         )
 
 
+def conversation_title_from_prompt(prompt: str) -> str:
+    words = " ".join(prompt.strip().split())
+    if not words:
+        return "New conversation"
+    title = words[:72].rstrip(" .,;:-")
+    return title or "New conversation"
+
+
 @router.post("/chat/start", response_model=ChatStartResponse)
 async def chat_start(payload: ChatStartRequest) -> ChatStartResponse:
     request_id = uuid4().hex
@@ -56,6 +66,7 @@ async def chat_start(payload: ChatStartRequest) -> ChatStartResponse:
         validate_prompt_content(msg.content)
     await ensure_model_available(payload.model)
     trimmed = context_manager.trim_messages(payload.messages, payload.context_tokens)
+    _request_input_tokens[request_id] = token_counter.count_messages(trimmed)
     _requests[request_id] = payload.model_copy(update={"messages": trimmed})
     return ChatStartResponse(
         request_id=request_id,
@@ -75,15 +86,21 @@ async def chat_start_auth(
         validate_prompt_content(msg.content)
     await ensure_model_available(payload.model)
     trimmed = context_manager.trim_messages(payload.messages, payload.context_tokens)
-    token_input = sum(max(1, len(m.content) // 4) for m in trimmed)
+    token_input = token_counter.count_messages(trimmed)
 
     conversation: Conversation | None = None
+    existing_message_count = 0
     if payload.conversation_id:
         conversation = await session.get(Conversation, payload.conversation_id)
+        if conversation:
+            count_result = await session.execute(
+                select(Message).where(Message.conversation_id == conversation.id).order_by(Message.created_at.asc())
+            )
+            existing_message_count = len(count_result.scalars().all())
     if conversation is None:
         conversation = Conversation(
             user_id=current_user.id,
-            title=(trimmed[0].content[:80] if trimmed else "New conversation"),
+            title=conversation_title_from_prompt(trimmed[0].content if trimmed else ""),
             model_name=payload.model,
             context_window=payload.context_tokens,
             total_tokens=0,
@@ -96,17 +113,25 @@ async def chat_start_auth(
             raise
 
     try:
-        for msg in trimmed:
+        new_messages = payload.messages[existing_message_count:] if existing_message_count else payload.messages
+        if not new_messages and payload.messages:
+            new_messages = [payload.messages[-1]]
+        for msg in new_messages:
+            msg_tokens = token_counter.count_text(msg.content)
             session.add(Message(
                 conversation_id=conversation.id,
                 role=msg.role,
                 content=msg.content,
-                token_count=max(1, len(msg.content) // 4),
+                token_count=msg_tokens,
                 latency_ms=0,
                 model_name=payload.model,
                 request_id=request_id,
             ))
+            conversation.total_tokens += msg_tokens
 
+        conversation.updated_at = datetime.now(timezone.utc)
+        conversation.context_window = payload.context_tokens
+        conversation.model_name = payload.model
         session.add(RequestLog(
             user_id=current_user.id,
             endpoint="/v1/chat/start-auth",
@@ -129,6 +154,7 @@ async def chat_start_auth(
             "messages": trimmed,
             "conversation_id": conversation_id,
         })
+        _request_input_tokens[request_id] = token_input
         TOKENS_IN.labels(model=payload.model).inc(token_input)
         ACTIVE_STREAMS.labels(type="chat").inc()
     except Exception as e:
@@ -184,6 +210,7 @@ async def chat_stream(
         finally:
             await session_registry.pop(request_id)
             _requests.pop(request_id, None)
+            input_tokens = _request_input_tokens.pop(request_id, 0)
             _stopped_requests.discard(request_id)
             duration_ms = int((datetime.now(timezone.utc) - started).total_seconds() * 1000)
             TOKENS_OUT.labels(model=req.model).inc(output_tokens)
@@ -206,12 +233,16 @@ async def chat_stream(
                         model_name=req.model,
                         request_id=request_id,
                     ))
+                    conv = await session.get(Conversation, req.conversation_id)
+                    if conv:
+                        conv.total_tokens += output_tokens
+                        conv.updated_at = datetime.now(timezone.utc)
                 session.add(ModelUsageLog(
                     model_name=req.model,
                     request_id=request_id,
-                    tokens_input=0,
+                    tokens_input=input_tokens,
                     tokens_output=output_tokens,
-                    total_tokens=output_tokens,
+                    total_tokens=input_tokens + output_tokens,
                     duration_ms=duration_ms,
                     gpu_used=True,
                 ))

@@ -50,7 +50,7 @@ class OllamaClient:
 
     async def model_exists(self, model: str) -> bool:
         models = await self.list_models()
-        return any(m.get("name") == model for m in models)
+        return any((m.get("name") or m.get("model")) == model for m in models)
 
     # -------------------------------
     # RUNNING MODELS
@@ -66,17 +66,16 @@ class OllamaClient:
     # STOP MODEL (STRONG)
     # -------------------------------
     async def stop_model(self, model: str) -> None:
-        try:
-            await self._request("POST", "/api/stop", json={"name": model})
-        except Exception:
-            pass
+        await self._request("POST", "/api/generate", json={"model": model, "prompt": "", "keep_alive": 0, "stream": False})
 
         # 🔥 ensure it's actually stopped
         for _ in range(5):
             running = await self.list_running()
-            if not any(m.get("name") == model for m in running):
+            if not any((m.get("name") or m.get("model")) == model for m in running):
                 return
             await asyncio.sleep(0.5)
+
+        raise RuntimeError(f"Model {model} is still running")
 
     # -------------------------------
     # DELETE MODEL (🔥 KEY FIX)
@@ -90,7 +89,7 @@ class OllamaClient:
             raise ValueError(f"Model {model} not found")
 
         # Step 3: delete
-        await self._request("DELETE", "/api/delete", json={"name": model})
+        await self._request("DELETE", "/api/delete", json={"model": model})
 
         # Step 4: VERIFY (CRITICAL)
         for _ in range(5):
@@ -117,7 +116,7 @@ class OllamaClient:
 
     async def pull_model(self, model: str) -> AsyncIterator[dict]:
         async with httpx.AsyncClient(timeout=None) as client:
-            async with client.stream("POST", f"{self.base_url}/api/pull", json={"name": model}) as response:
+            async with client.stream("POST", f"{self.base_url}/api/pull", json={"model": model}) as response:
                 response.raise_for_status()
 
                 async for line in response.aiter_lines():

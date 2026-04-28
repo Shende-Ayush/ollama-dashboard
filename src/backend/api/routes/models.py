@@ -11,17 +11,20 @@ import json
 import logging
 import os
 import asyncio
+import re
+import time
 from datetime import datetime, timezone
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import func, select
 
-from backend.common.db.session import get_db_session
+from backend.common.db.session import SessionLocal, get_db_session
 from backend.features.llm.providers.ollama_provider import OllamaProvider
 from backend.features.metrics.models import SystemMetric
-from backend.features.models.models import ModelRegistryCache
+from backend.features.models.models import ModelDownloadJob, ModelRegistryCache
 from backend.features.models.schemas import PullModelRequest, StopModelRequest
 from backend.schemas.pagination import paginate
 from backend.services.metrics.docker_metrics import DockerMetricsService
@@ -39,6 +42,9 @@ router = APIRouter(tags=["models"])
 provider = OllamaProvider()
 docker_metrics = DockerMetricsService()
 gpu_metrics = GpuMetricsService()
+_pull_tasks: dict[str, asyncio.Task] = {}
+_MODEL_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._/-]*(?::[a-zA-Z0-9][a-zA-Z0-9._-]*)?$")
+TERMINAL_DOWNLOAD_STATES = {"success", "error", "cancelled"}
 
 DEFAULT_POPULAR_MODELS = [
     {
@@ -81,6 +87,139 @@ async def retry(operation, *args, retries=3, delay=1, **kwargs):
             await asyncio.sleep(delay)
 
 
+def normalize_model_name(model_name: str) -> str:
+    normalized = model_name.strip()
+    if not normalized:
+        raise HTTPException(400, "Model name required")
+    if len(normalized) > 255 or not _MODEL_NAME_RE.match(normalized):
+        raise HTTPException(400, "Model name is not a valid Ollama model identifier")
+    return normalized
+
+
+def model_library_path(model_name: str) -> str:
+    return model_name.split(":", 1)[0]
+
+
+async def validate_pullable_model(model_name: str, client: OllamaClient | None = None) -> None:
+    client = client or OllamaClient()
+    try:
+        if await client.model_exists(model_name):
+            return
+    except Exception as exc:
+        logger.warning("Could not check installed model list before pull: %s", exc)
+
+    url = f"https://ollama.com/library/{model_library_path(model_name)}"
+    try:
+        async with httpx.AsyncClient(timeout=10, follow_redirects=True) as http:
+            response = await http.get(url)
+    except httpx.HTTPError as exc:
+        raise HTTPException(503, "Could not verify model against the Ollama registry") from exc
+
+    if response.status_code == 404:
+        raise HTTPException(404, f"Model '{model_name}' was not found in the Ollama registry")
+    if response.status_code >= 400:
+        raise HTTPException(502, f"Ollama registry validation failed with status {response.status_code}")
+
+
+async def download_job_payload(job: ModelDownloadJob) -> dict:
+    size_gb = round(job.total_bytes / (1024 ** 3), 2) if job.total_bytes else None
+    return {
+        "request_id": job.request_id,
+        "model": job.model_name,
+        "model_name": job.model_name,
+        "status": job.status,
+        "completed": job.completed_bytes,
+        "total": job.total_bytes,
+        "percent": job.percent,
+        "speed_mbps": job.speed_mbps,
+        "eta_seconds": None,
+        "size_gb": size_gb,
+        "stop_requested": job.stop_requested,
+        "error": job.error,
+        "started_at": job.started_at.isoformat() if job.started_at else None,
+        "updated_at": job.updated_at.isoformat() if job.updated_at else None,
+        "completed_at": job.completed_at.isoformat() if job.completed_at else None,
+    }
+
+
+async def persist_download_event(request_id: str, item: dict, started: float) -> None:
+    now = datetime.now(timezone.utc)
+    completed = int(item.get("completed") or 0)
+    total = int(item.get("total") or 0)
+    percent = round((completed / total * 100), 1) if total else (100.0 if item.get("status") == "success" else 0.0)
+    elapsed = max(time.time() - started, 0.001)
+    async with SessionLocal() as session:
+        job = await session.get(ModelDownloadJob, request_id)
+        if not job:
+            return
+        job.status = item.get("status") or job.status
+        job.completed_bytes = completed or job.completed_bytes
+        job.total_bytes = total or job.total_bytes
+        job.percent = max(job.percent or 0, percent)
+        job.speed_mbps = round((job.completed_bytes / 1024 / 1024) / elapsed, 2) if job.completed_bytes else 0
+        job.updated_at = now
+        if job.status == "success":
+            job.percent = 100
+            job.completed_at = now
+        await session.commit()
+
+
+async def run_pull_job(request_id: str, model_name: str) -> None:
+    client = OllamaClient()
+    started = time.time()
+    try:
+        async for item in client.pull_model(model_name):
+            async with SessionLocal() as session:
+                job = await session.get(ModelDownloadJob, request_id)
+                if job and job.stop_requested:
+                    job.status = "cancelled"
+                    job.completed_at = datetime.now(timezone.utc)
+                    job.updated_at = job.completed_at
+                    await session.commit()
+                    return
+            await persist_download_event(request_id, item, started)
+
+        async with SessionLocal() as session:
+            now = datetime.now(timezone.utc)
+            job = await session.get(ModelDownloadJob, request_id)
+            if job:
+                job.status = "success"
+                job.percent = 100
+                job.updated_at = now
+                job.completed_at = now
+            cache = await session.get(ModelRegistryCache, model_name)
+            if not cache:
+                cache = ModelRegistryCache(model_name=model_name)
+                session.add(cache)
+            cache.downloaded = True
+            cache.pulled_at = now
+            await session.commit()
+    except asyncio.CancelledError:
+        async with SessionLocal() as session:
+            job = await session.get(ModelDownloadJob, request_id)
+            if job:
+                now = datetime.now(timezone.utc)
+                job.status = "cancelled"
+                job.stop_requested = True
+                job.updated_at = now
+                job.completed_at = now
+                await session.commit()
+        raise
+    except Exception as exc:
+        logger.exception("Model pull failed for %s", model_name)
+        async with SessionLocal() as session:
+            job = await session.get(ModelDownloadJob, request_id)
+            if job:
+                now = datetime.now(timezone.utc)
+                job.status = "error"
+                job.error = str(exc)
+                job.updated_at = now
+                job.completed_at = now
+                await session.commit()
+    finally:
+        _pull_tasks.pop(request_id, None)
+
+
 # -------------------------------
 # GET MODELS (Optimized)
 # -------------------------------
@@ -111,27 +250,36 @@ async def get_models(
             "modified_at": m.get("modified_at"),
         })
 
-    # Batch DB insert
-    existing_models = {
-        row[0] for row in (await session.execute(
-            select(ModelRegistryCache.model_name)
-        )).all()
-    }
-
-    new_entries = [
-        ModelRegistryCache(
-            model_name=m["name"],
-            size_gb=m["size_gb"],
-            quantization=m["quantization"],
-            downloaded=True,
-            pulled_at=datetime.now(timezone.utc),
-        )
-        for m in normalized if m["name"] not in existing_models
-    ]
-
-    if new_entries:
-        session.add_all(new_entries)
+    installed_names = {m["name"] for m in normalized if m["name"]}
+    cache_result = await session.execute(select(ModelRegistryCache))
+    cache_by_name = {row.model_name: row for row in cache_result.scalars().all()}
+    now = datetime.now(timezone.utc)
+    for item in normalized:
+        cache = cache_by_name.get(item["name"])
+        if not cache:
+            cache = ModelRegistryCache(model_name=item["name"])
+            session.add(cache)
+            cache_by_name[item["name"]] = cache
+        cache.size_gb = item["size_gb"]
+        cache.quantization = item["quantization"]
+        cache.downloaded = True
+        cache.pulled_at = cache.pulled_at or now
+    for cache in cache_by_name.values():
+        if cache.model_name not in installed_names and cache.downloaded:
+            cache.downloaded = False
+    if cache_by_name:
         await session.commit()
+
+    active_result = await session.execute(
+        select(ModelDownloadJob).where(ModelDownloadJob.status.notin_(list(TERMINAL_DOWNLOAD_STATES)))
+    )
+    active_by_name = {job.model_name: await download_job_payload(job) for job in active_result.scalars().all()}
+    for item in normalized:
+        cache = cache_by_name.get(item["name"])
+        item["model_id"] = item["name"]
+        item["downloaded"] = True
+        item["pulled_at"] = cache.pulled_at.isoformat() if cache and cache.pulled_at else None
+        item["download"] = active_by_name.get(item["name"])
 
     return paginate(normalized, pg_no=pg_no, pg_size=pg_size).model_dump()
 
@@ -160,6 +308,8 @@ async def get_popular_models(
     family: Optional[str] = None,
     search: Optional[str] = None,
     recommended_only: bool = False,
+    pg_no: int = Query(default=1, ge=1),
+    pg_size: int = Query(default=24, ge=1, le=100),
     session: AsyncSession = Depends(get_db_session),
 ):
     try:
@@ -248,11 +398,73 @@ async def get_popular_models(
         )
     )
 
+    page = paginate(results, pg_no=pg_no, pg_size=pg_size).model_dump()
     return {
-        "items": results,
+        "items": page["items"],
+        "page": page["page"],
         "families": sorted(list({r["family"] for r in results})),
         "total": len(results),
     }
+
+
+@router.get("/models/pull-info")
+async def pull_info(model: str = Query(...), session: AsyncSession = Depends(get_db_session)):
+    model_name = normalize_model_name(model)
+    client = OllamaClient()
+    await validate_pullable_model(model_name, client)
+    cache = await session.get(ModelRegistryCache, model_name)
+    try:
+        downloaded = await client.model_exists(model_name)
+    except Exception:
+        downloaded = bool(cache and cache.downloaded)
+
+    active = await session.execute(
+        select(ModelDownloadJob)
+        .where(ModelDownloadJob.model_name == model_name, ModelDownloadJob.status.notin_(list(TERMINAL_DOWNLOAD_STATES)))
+        .order_by(ModelDownloadJob.started_at.desc())
+        .limit(1)
+    )
+    job = active.scalar_one_or_none()
+    disk_used = await session.execute(select(func.sum(ModelRegistryCache.size_gb)).where(ModelRegistryCache.downloaded == True))  # noqa: E712
+    current_disk = round(float(disk_used.scalar() or 0), 2)
+    return {
+        "model_name": model_name,
+        "download_size_gb": cache.size_gb if cache else None,
+        "estimated_disk_after_pull_gb": current_disk + float(cache.size_gb or 0) if cache and cache.size_gb else current_disk,
+        "downloaded": downloaded,
+        "pulled_at": cache.pulled_at.isoformat() if cache and cache.pulled_at else None,
+        "download": await download_job_payload(job) if job else None,
+    }
+
+
+@router.get("/models/downloads")
+async def list_downloads(
+    active_only: bool = False,
+    pg_no: int = Query(default=1, ge=1),
+    pg_size: int = Query(default=20, ge=1, le=100),
+    session: AsyncSession = Depends(get_db_session),
+):
+    stmt = select(ModelDownloadJob).order_by(ModelDownloadJob.started_at.desc())
+    if active_only:
+        stmt = stmt.where(ModelDownloadJob.status.notin_(list(TERMINAL_DOWNLOAD_STATES)))
+    result = await session.execute(stmt)
+    items = [await download_job_payload(job) for job in result.scalars().all()]
+    return paginate(items, pg_no=pg_no, pg_size=pg_size).model_dump()
+
+
+@router.post("/models/pull/{request_id}/stop")
+async def stop_pull(request_id: str, session: AsyncSession = Depends(get_db_session)):
+    job = await session.get(ModelDownloadJob, request_id)
+    if not job:
+        raise HTTPException(404, "Download job not found")
+    job.stop_requested = True
+    job.status = "cancelled" if job.status in {"queued", "connecting"} else job.status
+    job.updated_at = datetime.now(timezone.utc)
+    await session.commit()
+    task = _pull_tasks.get(request_id)
+    if task and not task.done():
+        task.cancel()
+    return {"request_id": request_id, "status": "cancel_requested", "model": job.model_name}
 # -------------------------------
 # STOP MODEL
 # -------------------------------
@@ -309,45 +521,41 @@ async def pull_model(
     payload: PullModelRequest,
     session: AsyncSession = Depends(get_db_session),
 ):
-    model_name = payload.model.strip()
-    if not model_name:
-        raise HTTPException(400, "Model name required")
+    model_name = normalize_model_name(payload.model)
+    await validate_pullable_model(model_name)
 
-    client = OllamaClient()
+    active_result = await session.execute(
+        select(ModelDownloadJob)
+        .where(ModelDownloadJob.model_name == model_name, ModelDownloadJob.status.notin_(list(TERMINAL_DOWNLOAD_STATES)))
+        .order_by(ModelDownloadJob.started_at.desc())
+        .limit(1)
+    )
+    job = active_result.scalar_one_or_none()
+    if not job:
+        request_id = uuid4().hex
+        job = ModelDownloadJob(request_id=request_id, model_name=model_name, status="queued")
+        session.add(job)
+        await session.commit()
+        task = asyncio.create_task(run_pull_job(request_id, model_name))
+        _pull_tasks[request_id] = task
+    else:
+        request_id = job.request_id
 
     async def event_gen():
-        import time
-        start = time.time()
-
-        async for item in client.pull_model(model_name):
-            completed = item.get("completed", 0)
-            total = item.get("total", 0)
-
-            percent = round((completed / total * 100), 1) if total else 0
-            elapsed = time.time() - start
-
-            event = {
-                "status": item.get("status"),
-                "percent": percent,
-                "speed_mbps": round((completed / 1024 / 1024) / elapsed, 2) if elapsed else 0,
-            }
-
-            yield f"data: {json.dumps(event)}\n\n"
-
-        # DB update AFTER stream ends
-        try:
-            cache = await session.get(ModelRegistryCache, model_name)
-            if not cache:
-                cache = ModelRegistryCache(model_name=model_name)
-                session.add(cache)
-
-            cache.downloaded = True
-            cache.pulled_at = datetime.now(timezone.utc)
-            await session.commit()
-        except Exception:
-            pass
-
-        yield f"data: {json.dumps({'status': 'success'})}\n\n"
+        last_status = None
+        while True:
+            async with SessionLocal() as read_session:
+                current = await read_session.get(ModelDownloadJob, request_id)
+                if not current:
+                    yield f"data: {json.dumps({'request_id': request_id, 'model': model_name, 'status': 'error', 'percent': 0, 'completed': 0, 'total': 0, 'speed_mbps': 0, 'eta_seconds': None, 'size_gb': None, 'error': 'Download job disappeared'})}\n\n"
+                    return
+                payload_dict = await download_job_payload(current)
+            if payload_dict != last_status:
+                yield f"data: {json.dumps(payload_dict)}\n\n"
+                last_status = payload_dict
+            if payload_dict["status"] in TERMINAL_DOWNLOAD_STATES:
+                return
+            await asyncio.sleep(0.5)
 
     return StreamingResponse(event_gen(), media_type="text/event-stream")
 
@@ -399,7 +607,8 @@ async def delete_model(model_name: str, session: AsyncSession = Depends(get_db_s
     # DB cleanup
     cache = await session.get(ModelRegistryCache, model_name)
     if cache:
-        await session.delete(cache)
+        cache.downloaded = False
+        cache.last_used_at = None
         await session.commit()
 
     return {"status": "deleted", "model": model_name}
