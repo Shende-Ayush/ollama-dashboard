@@ -137,9 +137,7 @@ def build_search_url(page, query=None, sort=SortOption.POPULAR, capabilities=Non
 
     return base
 
-
-def get_model_tags(model_name):
-    url = f"{BASE_URL}/library/{model_name}/tags"
+def get_model_tags_from_url(url):
 
     try:
         res = requests.get(url, headers=HEADERS)
@@ -191,9 +189,19 @@ def get_model_tags(model_name):
         return tags
 
     except Exception as e:
-        print(f"[ERROR] {model_name}: {e}")
+        print(f"[ERROR] {url}: {e}")
         return []
 
+
+def get_model_tags(model_name):
+    library = f"{BASE_URL}/library/{model_name}"
+    model_named_liberary = f"{BASE_URL}/{model_name}"
+
+    for url in [library, model_named_liberary]:
+        tags = get_model_tags_from_url(url + "/tags")
+        if tags:
+            return tags
+    return []
 
 # -----------------------------------
 # STEP 4: MERGE EVERYTHING
