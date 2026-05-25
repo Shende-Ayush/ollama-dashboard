@@ -14,6 +14,7 @@ from backend.api.routes.models import router as models_router
 from backend.api.routes.prompt_studio import router as prompt_studio_router
 from backend.api.routes.requests import router as requests_router
 from backend.api.routes.smart_commands import router as smart_commands_router
+from backend.api.routes.code_execution import router as code_execution_router
 from backend.api.routes.usage import router as usage_router
 from backend.common.db.base import Base
 from backend.common.db.session import engine
@@ -69,4 +70,5 @@ app.include_router(models_router, prefix="/api")
 app.include_router(prompt_studio_router, prefix="/api")
 app.include_router(requests_router, prefix="/api")
 app.include_router(smart_commands_router, prefix="/api")
+app.include_router(code_execution_router, prefix="/api")
 app.include_router(usage_router, prefix="/api")
