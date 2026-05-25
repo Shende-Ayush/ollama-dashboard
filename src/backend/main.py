@@ -3,13 +3,17 @@ from fastapi.responses import RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.api.routes.admin import router as admin_router
+from backend.api.routes.agents import router as agents_router
 from backend.api.routes.analytics import router as analytics_router
 from backend.api.routes.chat import router as chat_router
 from backend.api.routes.commands import router as commands_router
 from backend.api.routes.conversations import router as conversations_router
+from backend.api.routes.health import router as health_router
 from backend.api.routes.metrics import router as metrics_router
 from backend.api.routes.models import router as models_router
+from backend.api.routes.prompt_studio import router as prompt_studio_router
 from backend.api.routes.requests import router as requests_router
+from backend.api.routes.smart_commands import router as smart_commands_router
 from backend.api.routes.usage import router as usage_router
 from backend.common.db.base import Base
 from backend.common.db.session import engine
@@ -54,11 +58,15 @@ async def prometheus_metrics():
     return metrics_response()
 
 app.include_router(admin_router, prefix="/api")
+app.include_router(agents_router, prefix="/api")
 app.include_router(analytics_router, prefix="/api")
 app.include_router(chat_router, prefix="/api")
 app.include_router(commands_router, prefix="/api")
 app.include_router(conversations_router, prefix="/api")
+app.include_router(health_router, prefix="/api")
 app.include_router(metrics_router, prefix="/api")
 app.include_router(models_router, prefix="/api")
+app.include_router(prompt_studio_router, prefix="/api")
 app.include_router(requests_router, prefix="/api")
+app.include_router(smart_commands_router, prefix="/api")
 app.include_router(usage_router, prefix="/api")

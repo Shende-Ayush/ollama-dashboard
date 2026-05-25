@@ -6,14 +6,20 @@ from backend.common.config.settings import get_settings
 
 settings = get_settings()
 
-# Create async engine with production-safe configs
-engine = create_async_engine(
-    settings.database_url,
-    pool_pre_ping=True,
-    pool_size=10,
-    max_overflow=20,
-    pool_timeout=30,
-)
+# Create async engine with dialect-appropriate configs
+_engine_kwargs = {
+    "pool_pre_ping": True,
+}
+
+# Pool settings only for PostgreSQL (not SQLite)
+if "sqlite" not in settings.database_url:
+    _engine_kwargs.update({
+        "pool_size": 10,
+        "max_overflow": 20,
+        "pool_timeout": 30,
+    })
+
+engine = create_async_engine(settings.database_url, **_engine_kwargs)
 
 # Session factory
 SessionLocal = async_sessionmaker(
