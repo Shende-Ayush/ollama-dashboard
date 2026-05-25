@@ -8,6 +8,10 @@ import { ConversationsPage } from "../pages/ConversationsPage";
 import { TerminalPage }      from "../pages/TerminalPage";
 import { AnalyticsPage }     from "../pages/AnalyticsPage";
 import { DiscoverPage }      from "../pages/DiscoverPage";
+import { SmartCommandsPage } from "../pages/SmartCommandsPage";
+import { PromptStudioPage }  from "../pages/PromptStudioPage";
+import { AgentsPage }        from "../pages/AgentsPage";
+import { HealthPage }        from "../pages/HealthPage";
 
 const NAV = [
   { to: "/models",        icon: "⬡", label: "Models",        section: "main" },
@@ -16,6 +20,10 @@ const NAV = [
   { to: "/conversations", icon: "≡", label: "Conversations",  section: "main" },
   { to: "/terminal",      icon: "$", label: "Terminal",       section: "tools" },
   { to: "/analytics",     icon: "◈", label: "Analytics",      section: "tools" },
+  { to: "/smart-commands", icon: "~", label: "Smart Cmds",    section: "ai" },
+  { to: "/prompt-studio",  icon: "✎", label: "Prompts",       section: "ai" },
+  { to: "/agents",         icon: "@", label: "Agents",        section: "ai" },
+  { to: "/health",         icon: "+", label: "Health",        section: "ai" },
 ];
 
 export function App() {
@@ -55,6 +63,18 @@ export function App() {
                 {n.label}
               </NavLink>
             ))}
+
+            <span className="nav-section-label">AI</span>
+            {NAV.filter(n => n.section === "ai").map(n => (
+              <NavLink
+                key={n.to}
+                to={n.to}
+                className={({ isActive }) => `nav-link${isActive ? " active" : ""}`}
+              >
+                <span style={{ fontFamily: "var(--font-mono)", fontSize: 13, width: 16, textAlign: "center" }}>{n.icon}</span>
+                {n.label}
+              </NavLink>
+            ))}
           </div>
 
           <div className="nav-footer">
@@ -79,6 +99,10 @@ export function App() {
             <Route path="/conversations" element={<ConversationsPage />} />
             <Route path="/terminal"      element={<TerminalPage />} />
             <Route path="/analytics"     element={<AnalyticsPage />} />
+            <Route path="/smart-commands" element={<SmartCommandsPage />} />
+            <Route path="/prompt-studio"  element={<PromptStudioPage />} />
+            <Route path="/agents"         element={<AgentsPage />} />
+            <Route path="/health"         element={<HealthPage />} />
           </Routes>
         </div>
       </div>
