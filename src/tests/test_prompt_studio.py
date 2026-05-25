@@ -12,10 +12,8 @@ Covers:
 import uuid
 
 import pytest
-import pytest_asyncio
 from unittest.mock import AsyncMock, MagicMock
 
-from backend.features.prompt_studio.models import PromptTemplate, PromptVersion
 from backend.features.prompt_studio.schemas import (
     CreatePromptTemplateRequest,
     UpdatePromptTemplateRequest,

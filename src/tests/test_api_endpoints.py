@@ -5,7 +5,6 @@ Uses the FastAPI test client to verify endpoint behavior.
 Covers: health, prompt studio, smart commands, and agents API routes.
 """
 import pytest
-import pytest_asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 

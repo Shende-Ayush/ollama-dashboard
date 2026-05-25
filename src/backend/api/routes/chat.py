@@ -6,8 +6,6 @@ from uuid import uuid4
 
 import logging
 
-logger = logging.getLogger(__name__)
-
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
@@ -16,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.common.db.session import SessionLocal, get_db_session
 from backend.common.observability.prometheus import ACTIVE_STREAMS, TOKENS_IN, TOKENS_OUT
 from backend.common.contracts.envelopes import StreamEvent
-from backend.common.security.no_auth import require_api_key, resolve_user_from_token
+from backend.common.security.no_auth import require_api_key
 from backend.common.security.prompt_guard import validate_prompt_content
 from backend.features.chat.schemas import ChatStartRequest, ChatStartResponse, ChatStopRequest
 from backend.features.conversations.models import Conversation, Message
@@ -28,6 +26,8 @@ from backend.services.context_manager import context_manager
 from backend.services.process_supervisor import process_supervisor
 from backend.services.session_registry import session_registry
 from backend.services.token_counter import token_counter
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["chat"])
 provider = OllamaProvider()

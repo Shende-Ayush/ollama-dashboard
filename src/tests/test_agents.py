@@ -13,10 +13,8 @@ Covers:
 import uuid
 
 import pytest
-import pytest_asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
-from backend.features.agents.models import AgentConfig, AgentExecution
 from backend.features.agents.schemas import (
     AGENT_TYPES,
     CreateAgentRequest,

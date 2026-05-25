@@ -9,13 +9,11 @@ Covers:
 - Severity classification
 """
 import uuid
-from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-import pytest_asyncio
 
-from backend.features.health.models import HealthCheck, HealthIncident, RecoveryAction
+from backend.features.health.models import HealthIncident
 from backend.features.health.schemas import ComponentHealth, SystemHealthResponse
 from backend.features.health.service import HealthMonitorService
 

@@ -13,7 +13,6 @@ from backend.features.smart_commands.schemas import (
     CommandErrorAnalysisRequest,
     CommandExplainRequest,
     NaturalLanguageCommandRequest,
-    SmartAutocompleteRequest,
 )
 from backend.features.smart_commands.service import smart_command_service
 

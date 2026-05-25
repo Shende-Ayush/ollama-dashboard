@@ -10,7 +10,6 @@ from typing import Any
 from sqlalchemy import (
     Boolean,
     DateTime,
-    Float,
     Integer,
     String,
     Text,
