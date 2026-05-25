@@ -15,9 +15,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from backend.services.command_guard import validate_command
 from backend.services.circuit_breaker import CircuitBreaker
-from backend.services.token_counter import TokenCounter, token_counter
-from backend.services.context_manager import ContextManager, context_manager
-from backend.schemas.pagination import paginate, PaginatedResponse, PageMeta
+from backend.services.token_counter import TokenCounter
+from backend.services.context_manager import ContextManager
+from backend.schemas.pagination import paginate, PaginatedResponse
 from backend.features.chat.schemas import ChatMessage
 
 
@@ -280,7 +280,6 @@ class TestOllamaClient:
     @pytest.mark.asyncio
     async def test_list_models_calls_correct_endpoint(self):
         from backend.services.ollama_client import OllamaClient
-        import httpx
 
         client = OllamaClient(base_url="http://fake:11434")
         mock_response = MagicMock()

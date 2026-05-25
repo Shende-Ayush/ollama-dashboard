@@ -8,9 +8,7 @@ Tests cover:
 4. CodeActionService - supported actions list, unsupported action raises ValueError
 5. API endpoint tests (mock provider to avoid real Ollama)
 """
-import asyncio
 import time
-import uuid
 from collections.abc import AsyncGenerator
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -18,13 +16,12 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
-from backend.features.ai_coding.completion.cache import CompletionCache, CacheEntry
+from backend.features.ai_coding.completion.cache import CompletionCache
 from backend.features.ai_coding.completion.context_builder import ContextBuilder
-from backend.features.ai_coding.completion.model_router import ModelRouter, FIM_CAPABLE_MODELS
+from backend.features.ai_coding.completion.model_router import ModelRouter
 from backend.features.ai_coding.actions.service import CodeActionService
 from backend.features.ai_coding.schemas import (
     CodeActionRequest,
-    CompletionRequest,
 )
 
 

@@ -1,14 +1,10 @@
 """Editor AI Chat — conversational coding with file context."""
 import logging
 import time
-import uuid
-from datetime import datetime, timezone
-from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.features.ai_coding.chat.schemas import (
-    ChatMessage,
     ChatRequest,
     ChatResponse,
 )

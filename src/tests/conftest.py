@@ -13,7 +13,7 @@ import uuid
 from collections.abc import AsyncGenerator
 from datetime import datetime, timezone
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 # Override database URL BEFORE any app imports
 os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
@@ -59,7 +59,7 @@ async def setup_database():
     """Create all tables before each test and drop after."""
     # Register JSONB as JSON for SQLite compatibility
     from sqlalchemy.dialects.postgresql import JSONB, UUID as PG_UUID
-    from sqlalchemy import JSON, String, event
+    from sqlalchemy import event
 
     @event.listens_for(engine_test.sync_engine, "connect")
     def _set_sqlite_pragma(dbapi_connection, connection_record):
@@ -69,7 +69,6 @@ async def setup_database():
 
     # Render JSONB as JSON and UUID as String for SQLite
     from sqlalchemy.ext.compiler import compiles
-    from sqlalchemy.dialects.sqlite import dialect as sqlite_dialect
 
     @compiles(JSONB, "sqlite")
     def compile_jsonb_sqlite(type_, compiler, **kw):

@@ -10,11 +10,10 @@ Covers:
 """
 import pytest
 import pytest_asyncio
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 from backend.features.smart_commands.service import SmartCommandService
 from backend.features.smart_commands.schemas import (
-    CommandSuggestionResponse,
     NaturalLanguageCommandResponse,
     CommandExplanation,
     ErrorAnalysisResponse,

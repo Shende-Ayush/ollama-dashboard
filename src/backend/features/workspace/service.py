@@ -23,7 +23,6 @@ from backend.features.workspace.schemas import (
     SearchResult,
     WorkspaceResponse,
 )
-from backend.utils.security.path_validator import PathValidationError
 
 logger = logging.getLogger(__name__)
 
@@ -107,7 +106,7 @@ class WorkspaceService:
     async def list_workspaces(self, session: AsyncSession) -> list[WorkspaceResponse]:
         """List all active workspaces."""
         result = await session.execute(
-            select(Workspace).where(Workspace.is_active == True).order_by(Workspace.created_at.desc())
+            select(Workspace).where(Workspace.is_active).order_by(Workspace.created_at.desc())
         )
         workspaces = result.scalars().all()
         return [self._to_response(ws) for ws in workspaces]

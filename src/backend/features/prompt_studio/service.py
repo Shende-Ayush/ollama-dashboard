@@ -4,7 +4,6 @@ Prompt Engineering Studio — Service layer.
 Handles prompt CRUD, versioning, testing, and multi-model comparison.
 """
 import logging
-import re
 import time
 import uuid
 from datetime import datetime, timezone
@@ -370,8 +369,8 @@ class PromptStudioService:
         # Breakdown by content type
         lines = text.split("\n")
         code_lines = sum(
-            1 for l in lines
-            if l.strip().startswith(("def ", "class ", "import ", "from ", "{", "}", "//", "#"))
+            1 for line in lines
+            if line.strip().startswith(("def ", "class ", "import ", "from ", "{", "}", "//", "#"))
         )
         natural_lines = len(lines) - code_lines
 

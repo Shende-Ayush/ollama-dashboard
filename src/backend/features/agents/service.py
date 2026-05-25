@@ -4,7 +4,6 @@ Agents Framework — Service layer.
 Multi-agent orchestration engine with specialized agent types,
 execution tracking, and inter-agent communication.
 """
-import asyncio
 import json
 import logging
 import re
@@ -13,7 +12,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from sqlalchemy import select, func
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 

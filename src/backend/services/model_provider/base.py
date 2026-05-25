@@ -4,7 +4,7 @@ Supports: Ollama, OpenAI-compatible APIs, vLLM.
 """
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import AsyncIterator, Any
+from typing import AsyncIterator
 
 
 @dataclass

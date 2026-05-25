@@ -14,7 +14,6 @@ from backend.common.security.no_auth import get_anonymous_user
 from backend.services.command_guard import validate_command
 from backend.services.process_supervisor import process_supervisor
 from backend.services.ollama_client import OllamaClient
-from backend.schemas.pagination import paginate
 from backend.features.commands.models import CommandHistory
 from backend.features.requests.models import StreamingSession
 from backend.services.session_registry import ActiveSession, session_registry

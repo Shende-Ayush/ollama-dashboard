@@ -9,21 +9,14 @@ import os
 import shutil
 import tempfile
 import uuid
-from datetime import datetime, timezone
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.features.workspace.filesystem import FileSystemService
 from backend.features.workspace.git_service import GitService
-from backend.features.workspace.models import Workspace
 from backend.features.workspace.schemas import (
     CreateWorkspaceRequest,
-    FileNode,
-    GitStatusResponse,
-    SearchResult,
 )
 from backend.features.workspace.service import WorkspaceService
 from backend.utils.security.path_validator import PathValidationError

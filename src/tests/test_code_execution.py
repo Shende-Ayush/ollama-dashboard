@@ -11,8 +11,6 @@ Covers:
 - API endpoint tests
 """
 import pytest
-import pytest_asyncio
-from httpx import ASGITransport, AsyncClient
 
 from backend.features.code_execution.executor import CodeExecutor
 from backend.features.code_execution.guard import ExecutionGuard

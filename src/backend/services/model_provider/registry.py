@@ -2,7 +2,6 @@
 Model provider registry - manages multiple providers.
 """
 import logging
-from typing import Optional
 
 from backend.services.model_provider.base import ModelProvider
 from backend.services.model_provider.ollama import OllamaModelProvider

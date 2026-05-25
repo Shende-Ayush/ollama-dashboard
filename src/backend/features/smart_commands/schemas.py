@@ -3,7 +3,6 @@ Smart Command Center — Request/Response schemas.
 
 Pydantic models for API validation and serialization.
 """
-from datetime import datetime
 from typing import Optional
 
 from pydantic import BaseModel, Field

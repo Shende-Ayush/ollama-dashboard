@@ -7,7 +7,6 @@ Tests cover:
 3. DiffApplier — integration with workspace service
 4. API endpoint tests — /api/ai-chat/* routes
 """
-import asyncio
 import os
 import shutil
 import tempfile
@@ -18,10 +17,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.features.ai_coding.apply.diff_generator import (
-    FileDiff,
     extract_code_from_response,
     generate_diff,
 )

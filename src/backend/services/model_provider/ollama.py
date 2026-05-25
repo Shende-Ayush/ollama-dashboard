@@ -6,7 +6,6 @@ import logging
 from typing import AsyncIterator
 
 from backend.services.model_provider.base import (
-    ChatMessage,
     GenerationOptions,
     ModelInfo,
     ModelProvider,

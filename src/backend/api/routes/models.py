@@ -9,7 +9,6 @@
 
 import json
 import logging
-import os
 import asyncio
 import re
 import time
@@ -38,7 +37,6 @@ from backend.scrappers.ollama_scrapper import (
     get_model_tags
 )
 
-from backend.utils.ollama_scraper.client import OllamaScraper
 import httpx
 
 logger = logging.getLogger(__name__)
@@ -381,7 +379,7 @@ def estimate_model_size_gb(sizes: list[str]) -> float | None:
 # API: GET MODELS (META + TAGS)
 # -----------------------------------
 @router.get("/models/popular")
-async def get_models(
+async def get_popular_models(
     search: Optional[str] = None,
     sort: SortOption = SortOption.POPULAR,
     capabilities: Optional[list[Capability]] = Query(default=None),

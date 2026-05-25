@@ -9,7 +9,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.common.db.session import get_db_session
 from backend.common.security.no_auth import get_anonymous_user
 from backend.features.conversations.models import Conversation, Message
-from backend.schemas.pagination import paginate
 
 router = APIRouter(tags=["conversations"])
 

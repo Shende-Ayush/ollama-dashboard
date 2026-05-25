@@ -40,7 +40,7 @@ class ResourceLimiter:
 
         # Use runtime defaults as baseline
         default_timeout = runtime["timeout"] if runtime else 30
-        default_memory = runtime["memory_mb"] if runtime else 128
+        runtime["memory_mb"] if runtime else 128
 
         # Clamp to maximums
         effective_timeout = min(

@@ -7,7 +7,6 @@ Uses asyncio.to_thread for non-blocking I/O.
 import asyncio
 import hashlib
 import os
-from pathlib import Path
 from typing import Optional
 
 from backend.features.workspace.schemas import FileNode, SearchResult

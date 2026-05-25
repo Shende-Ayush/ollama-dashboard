@@ -3,7 +3,6 @@ Shared path traversal prevention utility.
 Used by: workspace, code_execution, mcp_server.
 """
 import os
-from pathlib import Path
 
 
 class PathValidationError(Exception):
