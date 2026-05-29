@@ -2,6 +2,7 @@ import React from "react";
 import { Navigate, NavLink, Route, Routes } from "react-router-dom";
 import { ToastProvider } from "../hooks/useToast";
 import { useTheme } from "../theme/ThemeProvider";
+import { ErrorBoundary } from "../common/ErrorBoundary";
 import { ModelsPage }        from "../pages/ModelsPage";
 import { ChatPage }          from "../pages/ChatPage";
 import { ConversationsPage } from "../pages/ConversationsPage";
@@ -92,17 +93,17 @@ export function App() {
         <div className="main-content">
           <Routes>
             <Route path="/"              element={<Navigate to="/models" replace />} />
-            <Route path="/models"        element={<ModelsPage />} />
-            <Route path="/discover"      element={<DiscoverPage />} />
-            <Route path="/chat"          element={<ChatPage />} />
-            <Route path="/chat/:convId"  element={<ChatPage />} />
-            <Route path="/conversations" element={<ConversationsPage />} />
-            <Route path="/terminal"      element={<TerminalPage />} />
-            <Route path="/analytics"     element={<AnalyticsPage />} />
-            <Route path="/smart-commands" element={<SmartCommandsPage />} />
-            <Route path="/prompt-studio"  element={<PromptStudioPage />} />
-            <Route path="/agents"         element={<AgentsPage />} />
-            <Route path="/health"         element={<HealthPage />} />
+            <Route path="/models"        element={<ErrorBoundary><ModelsPage /></ErrorBoundary>} />
+            <Route path="/discover"      element={<ErrorBoundary><DiscoverPage /></ErrorBoundary>} />
+            <Route path="/chat"          element={<ErrorBoundary><ChatPage /></ErrorBoundary>} />
+            <Route path="/chat/:convId"  element={<ErrorBoundary><ChatPage /></ErrorBoundary>} />
+            <Route path="/conversations" element={<ErrorBoundary><ConversationsPage /></ErrorBoundary>} />
+            <Route path="/terminal"      element={<ErrorBoundary><TerminalPage /></ErrorBoundary>} />
+            <Route path="/analytics"     element={<ErrorBoundary><AnalyticsPage /></ErrorBoundary>} />
+            <Route path="/smart-commands" element={<ErrorBoundary><SmartCommandsPage /></ErrorBoundary>} />
+            <Route path="/prompt-studio"  element={<ErrorBoundary><PromptStudioPage /></ErrorBoundary>} />
+            <Route path="/agents"         element={<ErrorBoundary><AgentsPage /></ErrorBoundary>} />
+            <Route path="/health"         element={<ErrorBoundary><HealthPage /></ErrorBoundary>} />
           </Routes>
         </div>
       </div>
