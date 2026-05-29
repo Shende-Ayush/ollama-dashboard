@@ -79,7 +79,7 @@ async def requests_timeseries(hours: int = Query(default=24, ge=1, le=720), sess
         .group_by(bucket)
         .order_by(bucket)
     )
-    return {"items": [{"bucket": r.bucket.isoformat() if r.bucket else None, "requests": int(r.requests),
+    return {"items": [{"bucket": r.bucket if isinstance(r.bucket, str) else (r.bucket.isoformat() if r.bucket else None), "requests": int(r.requests),
         "tokens_in": int(r.tokens_in or 0), "tokens_out": int(r.tokens_out or 0)} for r in result]}
 
 

@@ -153,8 +153,10 @@ async def validate_pullable_model(model_name: str, client: OllamaClient | None =
 
     if response.status_code == 404:
         raise HTTPException(404, f"Model '{model_name}' was not found in the Ollama registry")
-    if response.status_code >= 400:
-        logger.warning("Ollama registry returned status %d for model %s", response.status_code, model_name)
+    if 400 <= response.status_code < 500:
+        raise HTTPException(502, f"Ollama registry rejected the request (HTTP {response.status_code})")
+    if response.status_code >= 500:
+        logger.warning("Ollama registry returned server error %d for model %s - allowing pull to proceed", response.status_code, model_name)
 
 
 async def download_job_payload(job: ModelDownloadJob) -> dict:

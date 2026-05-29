@@ -8,15 +8,16 @@ interface Props {
 interface State {
   hasError: boolean;
   error: Error | null;
+  retryCount: number;
 }
 
 export class ErrorBoundary extends Component<Props, State> {
   constructor(props: Props) {
     super(props);
-    this.state = { hasError: false, error: null };
+    this.state = { hasError: false, error: null, retryCount: 0 };
   }
 
-  static getDerivedStateFromError(error: Error): State {
+  static getDerivedStateFromError(error: Error): Partial<State> {
     return { hasError: true, error };
   }
 
@@ -29,6 +30,9 @@ export class ErrorBoundary extends Component<Props, State> {
       if (this.props.fallback) {
         return this.props.fallback;
       }
+
+      const retriesExhausted = this.state.retryCount >= 2;
+
       return (
         <div style={{
           display: "flex",
@@ -41,16 +45,24 @@ export class ErrorBoundary extends Component<Props, State> {
           color: "var(--text-secondary)",
         }}>
           <div style={{ fontSize: 48 }}>&#9888;</div>
-          <h2 style={{ margin: 0, color: "var(--text-primary)" }}>Something went wrong</h2>
+          <h2 style={{ margin: 0, color: "var(--text-primary)" }}>
+            {retriesExhausted ? "This page keeps crashing" : "Something went wrong"}
+          </h2>
           <p style={{ margin: 0, fontSize: 14, textAlign: "center", maxWidth: 400 }}>
-            {this.state.error?.message || "An unexpected error occurred"}
+            {retriesExhausted
+              ? "This page keeps crashing. Please go back to the home page."
+              : (this.state.error?.message || "An unexpected error occurred")}
           </p>
-          <button
-            className="btn btn-primary"
-            onClick={() => this.setState({ hasError: false, error: null })}
-          >
-            Try Again
-          </button>
+          {retriesExhausted ? (
+            <a href="/" className="btn btn-primary">Go Home</a>
+          ) : (
+            <button
+              className="btn btn-primary"
+              onClick={() => this.setState(prev => ({ hasError: false, error: null, retryCount: prev.retryCount + 1 }))}
+            >
+              Try Again
+            </button>
+          )}
         </div>
       );
     }

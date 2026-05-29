@@ -11,20 +11,33 @@ from backend.services.circuit_breaker import circuit_breaker
 
 class OllamaClient:
     def __init__(self, base_url: str | None = None, timeout: float = 20.0) -> None:
-        host = os.getenv("OLLAMA_HOST", "ollama")  # 🔥 FIXED DEFAULT
+        host = os.getenv("OLLAMA_HOST", "ollama")
         port = os.getenv("OLLAMA_PORT", "11434")
 
         self.base_url = base_url or f"http://{host}:{port}"
         self.timeout = timeout
+        self._client: httpx.AsyncClient | None = None
+
+    @property
+    def client(self) -> httpx.AsyncClient:
+        """Lazily create the connection-pooled client."""
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.AsyncClient(timeout=self.timeout)
+        return self._client
+
+    async def close(self) -> None:
+        """Close the underlying HTTP client."""
+        if self._client and not self._client.is_closed:
+            await self._client.aclose()
+            self._client = None
 
     # -------------------------------
     # CORE REQUEST
     # -------------------------------
     async def _request(self, method: str, path: str, **kwargs) -> httpx.Response:
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            response = await client.request(method, f"{self.base_url}{path}", **kwargs)
-            response.raise_for_status()
-            return response
+        response = await self.client.request(method, f"{self.base_url}{path}", **kwargs)
+        response.raise_for_status()
+        return response
 
     async def _get_json(self, path: str) -> dict | list:
         response = await self._request("GET", path)
