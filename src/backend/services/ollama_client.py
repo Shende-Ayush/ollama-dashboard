@@ -17,16 +17,14 @@ class OllamaClient:
         self.base_url = base_url or f"http://{host}:{port}"
         self.timeout = timeout
 
-        # 🔥 Reuse client (connection pooling)
-        self.client = httpx.AsyncClient(timeout=self.timeout)
-
     # -------------------------------
     # CORE REQUEST
     # -------------------------------
     async def _request(self, method: str, path: str, **kwargs) -> httpx.Response:
-        response = await self.client.request(method, f"{self.base_url}{path}", **kwargs)
-        response.raise_for_status()
-        return response
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            response = await client.request(method, f"{self.base_url}{path}", **kwargs)
+            response.raise_for_status()
+            return response
 
     async def _get_json(self, path: str) -> dict | list:
         response = await self._request("GET", path)

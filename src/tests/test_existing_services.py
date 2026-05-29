@@ -286,7 +286,12 @@ class TestOllamaClient:
         mock_response.json.return_value = {"models": [{"name": "llama3.2:3b"}]}
         mock_response.raise_for_status = MagicMock()
 
-        with patch.object(client.client, "request", new=AsyncMock(return_value=mock_response)):
+        mock_async_client = AsyncMock()
+        mock_async_client.request = AsyncMock(return_value=mock_response)
+        mock_async_client.__aenter__ = AsyncMock(return_value=mock_async_client)
+        mock_async_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("backend.services.ollama_client.httpx.AsyncClient", return_value=mock_async_client):
             # Reset circuit breaker
             from backend.services.circuit_breaker import circuit_breaker
             circuit_breaker.failures = 0
@@ -305,7 +310,12 @@ class TestOllamaClient:
         mock_response.json.return_value = {"models": [{"name": "mistral:7b"}]}
         mock_response.raise_for_status = MagicMock()
 
-        with patch.object(client.client, "request", new=AsyncMock(return_value=mock_response)):
+        mock_async_client = AsyncMock()
+        mock_async_client.request = AsyncMock(return_value=mock_response)
+        mock_async_client.__aenter__ = AsyncMock(return_value=mock_async_client)
+        mock_async_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("backend.services.ollama_client.httpx.AsyncClient", return_value=mock_async_client):
             from backend.services.circuit_breaker import circuit_breaker
             circuit_breaker.failures = 0
             circuit_breaker.open_until = None
@@ -322,7 +332,12 @@ class TestOllamaClient:
         mock_response.json.return_value = {"models": [{"name": "llama3.2:3b"}]}
         mock_response.raise_for_status = MagicMock()
 
-        with patch.object(client.client, "request", new=AsyncMock(return_value=mock_response)):
+        mock_async_client = AsyncMock()
+        mock_async_client.request = AsyncMock(return_value=mock_response)
+        mock_async_client.__aenter__ = AsyncMock(return_value=mock_async_client)
+        mock_async_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("backend.services.ollama_client.httpx.AsyncClient", return_value=mock_async_client):
             from backend.services.circuit_breaker import circuit_breaker
             circuit_breaker.failures = 0
             circuit_breaker.open_until = None

@@ -148,12 +148,13 @@ async def validate_pullable_model(model_name: str, client: OllamaClient | None =
         async with httpx.AsyncClient(timeout=10, follow_redirects=True) as http:
             response = await http.get(url)
     except httpx.HTTPError as exc:
-        raise HTTPException(503, "Could not verify model against the Ollama registry") from exc
+        logger.warning("Could not verify model against Ollama registry (network issue): %s", exc)
+        return  # Allow pull to proceed - it will fail naturally if model doesn't exist
 
     if response.status_code == 404:
         raise HTTPException(404, f"Model '{model_name}' was not found in the Ollama registry")
     if response.status_code >= 400:
-        raise HTTPException(502, f"Ollama registry validation failed with status {response.status_code}")
+        logger.warning("Ollama registry returned status %d for model %s", response.status_code, model_name)
 
 
 async def download_job_payload(job: ModelDownloadJob) -> dict:

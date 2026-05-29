@@ -14,7 +14,16 @@ from backend.features.requests.models import RequestLog
 logger = logging.getLogger("api")
 
 # Paths that are too noisy / useless to log
-_SKIP_PATHS = {"/healthz", "/readyz", "/metrics", "/docs", "/redoc", "/openapi.json"}
+_SKIP_PATHS = {"/healthz", "/readyz", "/metrics", "/docs", "/redoc", "/openapi.json", "/health", "/favicon.ico"}
+
+
+def _should_log_to_db(path: str) -> bool:
+    """Only log API requests to database, skip static/health/docs paths."""
+    if path in _SKIP_PATHS:
+        return False
+    if path.startswith("/static") or path.startswith("/assets"):
+        return False
+    return True
 
 
 class CorrelationLoggingMiddleware(BaseHTTPMiddleware):
@@ -25,7 +34,7 @@ class CorrelationLoggingMiddleware(BaseHTTPMiddleware):
         request.state.request_log_id = None
 
         # Skip noisy health/metrics paths from DB logging
-        if request.url.path not in _SKIP_PATHS:
+        if _should_log_to_db(request.url.path):
             try:
                 async with SessionLocal() as session:
                     req_log = RequestLog(
@@ -48,7 +57,7 @@ class CorrelationLoggingMiddleware(BaseHTTPMiddleware):
         REQUEST_LATENCY.labels(method=request.method, path=request.url.path).observe(duration_ms / 1000.0)
         response.headers["x-correlation-id"] = correlation_id
 
-        if request.url.path not in _SKIP_PATHS:
+        if _should_log_to_db(request.url.path):
             try:
                 async with SessionLocal() as session:
                     if request.state.request_log_id:
