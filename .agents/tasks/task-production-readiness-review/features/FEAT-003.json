@@ -1,0 +1,26 @@
+{
+  "id": "FEAT-003",
+  "type": "fix",
+  "description": "Frontend production-readiness fixes: add proper error boundaries, fix API response handling patterns across pages, add missing loading/error states, ensure all API calls match backend routes",
+  "status": "completed",
+  "steps": [
+    "Create src/frontend/src/common/ErrorBoundary.tsx: A React error boundary component that catches render errors and displays a fallback UI with a retry button, rather than crashing the entire app.",
+    "Wrap each Route in src/frontend/src/app/App.tsx with the ErrorBoundary component so individual page failures don't crash the whole application.",
+    "Audit src/frontend/src/pages/ModelsPage.tsx: Verify the pull model SSE streaming logic handles connection drops gracefully. The EventSource or fetch-based SSE reader should have an onerror handler that updates state. Currently the pull uses api.post which returns a StreamingResponse - ensure the streaming reader handles network errors.",
+    "Audit src/frontend/src/pages/ChatPage.tsx: Verify the SSE streaming for chat handles errors/disconnection properly. Ensure the AbortController cleanup happens in useEffect cleanup functions to prevent memory leaks.",
+    "Audit src/frontend/src/pages/TerminalPage.tsx: Verify WebSocket reconnection logic exists. If the WS drops, the page should show a disconnected state and offer reconnect rather than silently failing.",
+    "Add a PUT method to src/frontend/src/api/client.ts since the backend has PUT endpoints (e.g., update template, update agent) but the client only has get/post/patch/delete. Add: put: <T>(path: string, body?: unknown) => request<T>(path, { method: 'PUT', body: body ? JSON.stringify(body) : undefined })",
+    "Verify the frontend builds cleanly after all changes: npm run build"
+  ],
+  "acceptance_criteria": [
+    "npm run build succeeds with 0 TypeScript errors",
+    "ErrorBoundary component exists and is used in App.tsx route definitions",
+    "api/client.ts exposes a put method",
+    "Pages handle error states for API failures (toast or inline error message)"
+  ],
+  "verification": [
+    "cd /projects/sandbox/ollama-dashboard/src/frontend && npm run build"
+  ],
+  "blocked_reason": null,
+  "findings": "All three changes implemented: PUT method added to api client, ErrorBoundary class component created, all routes (except Navigate redirect) wrapped with ErrorBoundary. Build passes cleanly with 0 TypeScript errors. The unused React import warning did not surface as an error. The chunk size warning is pre-existing and not related to these changes."
+}

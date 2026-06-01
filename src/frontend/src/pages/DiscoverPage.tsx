@@ -96,7 +96,7 @@ export function DiscoverPage() {
       params.set("page_size", String(PAGE_SIZE));
 
       const r     = await api.get<any>(`/models/popular?${params}`);
-      const raw   = r.data || r;
+      const raw   = r;
       const items = normalizePopularModels(raw.items ?? []);
 
       setHasMore(items.length >= PAGE_SIZE);
@@ -156,8 +156,8 @@ export function DiscoverPage() {
     }
 
     try {
-      const res    = await api.get(`/models/tags?model=${baseId}`);
-      const raw    = res?.data ?? res;
+      const res    = await api.get<any>(`/models/tags?model=${baseId}`);
+      const raw    = res;
       const parsed: ModelTag[] =
         Array.isArray(raw)        ? raw :
         Array.isArray(raw?.items) ? raw.items :

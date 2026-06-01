@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.common.db.session import get_db_session
@@ -109,9 +109,7 @@ async def delete_conversation(conversation_id: str, session: AsyncSession = Depe
     conv = await session.get(Conversation, conversation_id)
     if not conv:
         raise HTTPException(status_code=404, detail="Conversation not found")
-    msgs = await session.execute(select(Message).where(Message.conversation_id == conv.id))
-    for msg in msgs.scalars().all():
-        await session.delete(msg)
+    await session.execute(delete(Message).where(Message.conversation_id == conv.id))
     await session.delete(conv)
     await session.commit()
     return {"deleted": True, "id": conversation_id}

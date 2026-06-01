@@ -1,3 +1,5 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -24,11 +26,22 @@ from backend.common.db.session import engine
 from backend.common.logging.middleware import CorrelationLoggingMiddleware
 from backend.common.observability.prometheus import metrics_response
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    yield
+    # Shutdown (nothing needed)
+
+
 app = FastAPI(
     title="Ollama Dashboard API",
     docs_url="/docs",
     redoc_url="/redoc",
     openapi_url="/openapi.json",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -39,11 +52,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.add_middleware(CorrelationLoggingMiddleware)
-
-@app.on_event("startup")
-async def startup_event() -> None:
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
 
 @app.get("/", include_in_schema=False)
 async def root() -> RedirectResponse:

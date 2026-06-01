@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.common.db.session import get_db_session
+from backend.common.db.session import engine, get_db_session
 from backend.features.conversations.models import Conversation, Message
 from backend.features.metrics.models import SystemMetric
 from backend.features.requests.models import RequestLog
@@ -65,7 +65,11 @@ async def tokens_by_model(hours: int = Query(default=24, ge=1, le=720), session:
 @router.get("/analytics/requests-timeseries")
 async def requests_timeseries(hours: int = Query(default=24, ge=1, le=720), session: AsyncSession = Depends(get_db_session)):
     since = _since(hours)
-    bucket = func.date_trunc("hour", RequestLog.created_at).label("bucket")
+    # Use dialect-appropriate date truncation
+    if "sqlite" in str(engine.url):
+        bucket = func.strftime("%Y-%m-%dT%H:00:00", RequestLog.created_at).label("bucket")
+    else:
+        bucket = func.date_trunc("hour", RequestLog.created_at).label("bucket")
     result = await session.execute(
         select(bucket,
                func.count().label("requests"),
@@ -75,7 +79,7 @@ async def requests_timeseries(hours: int = Query(default=24, ge=1, le=720), sess
         .group_by(bucket)
         .order_by(bucket)
     )
-    return {"items": [{"bucket": r.bucket.isoformat() if r.bucket else None, "requests": int(r.requests),
+    return {"items": [{"bucket": r.bucket if isinstance(r.bucket, str) else (r.bucket.isoformat() if r.bucket else None), "requests": int(r.requests),
         "tokens_in": int(r.tokens_in or 0), "tokens_out": int(r.tokens_out or 0)} for r in result]}
 
 
